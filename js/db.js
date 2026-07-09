@@ -1,0 +1,233 @@
+/* ============================================================
+   db.js — データ層（localStorage抽象化）
+   キー: kintore_v1
+   将来IndexedDBやスプレッドシート同期に差し替えられるよう、
+   アプリ側は必ずこのDBオブジェクト経由でデータを操作する。
+   ============================================================ */
+'use strict';
+
+var DB = (function () {
+  var KEY = 'kintore_v1';
+  var PARTS = ['胸', '背中', '脚', '肩', '腕', '腹', '有酸素', 'その他'];
+  var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重'];
+  var DEFAULTS = [
+    ['ベンチプレス', '胸', 'バーベル'], ['ダンベルプレス', '胸', 'ダンベル'], ['インクラインベンチプレス', '胸', 'バーベル'], ['ダンベルフライ', '胸', 'ダンベル'], ['チェストプレス', '胸', 'マシン'],
+    ['デッドリフト', '背中', 'バーベル'], ['ラットプルダウン', '背中', 'マシン'], ['ベントオーバーロー', '背中', 'バーベル'], ['シーテッドロー', '背中', 'ケーブル'], ['懸垂', '背中', '自重'],
+    ['スクワット', '脚', 'バーベル'], ['レッグプレス', '脚', 'マシン'], ['レッグエクステンション', '脚', 'マシン'], ['レッグカール', '脚', 'マシン'], ['カーフレイズ', '脚', 'マシン'],
+    ['ショルダープレス', '肩', 'ダンベル'], ['サイドレイズ', '肩', 'ダンベル'], ['リアレイズ', '肩', 'ダンベル'], ['フロントレイズ', '肩', 'ダンベル'],
+    ['バーベルカール', '腕', 'バーベル'], ['ダンベルカール', '腕', 'ダンベル'], ['トライセプスプッシュダウン', '腕', 'ケーブル'], ['ナローベンチプレス', '腕', 'バーベル'],
+    ['アブローラー', '腹', '自重'], ['クランチ', '腹', '自重'], ['レッグレイズ', '腹', '自重'], ['プランク', '腹', '自重'],
+    ['トレッドミル', '有酸素', 'マシン'], ['エアロバイク', '有酸素', 'マシン'], ['ランニング', '有酸素', '自重'], ['ウォーキング', '有酸素', '自重']
+  ];
+
+  var state = null;
+
+  function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(state));
+    } catch (e) {
+      console.error('保存に失敗しました', e);
+    }
+  }
+
+  /* 既存データを新しいデータ構造に引き上げる */
+  function migrate() {
+    if (state.version >= 2) return;
+    // v2: 種目に器具(equip)フィールド追加・有酸素部位の初期種目追加
+    var equipMap = {};
+    DEFAULTS.forEach(function (d) { equipMap[d[1] + ':' + d[0]] = d[2]; });
+    state.exercises.forEach(function (ex) {
+      if (ex.equip === undefined) ex.equip = equipMap[ex.part + ':' + ex.name] || '';
+    });
+    var hasCardio = state.exercises.some(function (x) { return x.part === '有酸素'; });
+    if (!hasCardio) {
+      DEFAULTS.forEach(function (d) {
+        if (d[1] === '有酸素') state.exercises.push({ id: uid(), name: d[0], part: d[1], equip: d[2] });
+      });
+    }
+    state.version = 2;
+    save();
+  }
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) {
+        var s = JSON.parse(raw);
+        if (s && s.exercises && s.workouts) { state = s; migrate(); return; }
+      }
+    } catch (e) { /* 壊れていたら初期化 */ }
+    state = {
+      version: 2,
+      exercises: DEFAULTS.map(function (d, i) { return { id: 'd' + i, name: d[0], part: d[1], equip: d[2] }; }),
+      workouts: {}
+    };
+    save();
+  }
+
+  function todayStr() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+
+  function getWorkout(date) { return state.workouts[date] || null; }
+
+  function ensure(date) {
+    if (!state.workouts[date]) {
+      state.workouts[date] = { date: date, memo: '', entries: [] };
+    }
+    return state.workouts[date];
+  }
+
+  function findEntry(date, entryId) {
+    var w = getWorkout(date);
+    if (!w) return null;
+    for (var i = 0; i < w.entries.length; i++) {
+      if (w.entries[i].id === entryId) return w.entries[i];
+    }
+    return null;
+  }
+
+  function getExercise(id) {
+    for (var i = 0; i < state.exercises.length; i++) {
+      if (state.exercises[i].id === id) return state.exercises[i];
+    }
+    return null;
+  }
+
+  /* 指定日より前の、同じ種目の直近の記録を返す */
+  function prevRecord(exId, beforeDate) {
+    var dates = Object.keys(state.workouts).filter(function (d) { return d < beforeDate; }).sort().reverse();
+    for (var i = 0; i < dates.length; i++) {
+      var w = state.workouts[dates[i]];
+      var entries = w.entries || [];
+      for (var j = 0; j < entries.length; j++) {
+        if (entries[j].exId === exId && entries[j].sets.length) {
+          return { date: dates[i], sets: entries[j].sets };
+        }
+      }
+    }
+    return null;
+  }
+
+  load();
+
+  return {
+    PARTS: PARTS,
+    EQUIPS: EQUIPS,
+    todayStr: todayStr,
+
+    /* ---- 種目マスタ ---- */
+    getExercises: function () { return state.exercises.slice(); },
+    getExercise: getExercise,
+    addExercise: function (name, part, equip) {
+      var ex = { id: uid(), name: name, part: part, equip: equip || '' };
+      state.exercises.push(ex);
+      save();
+      return ex;
+    },
+    renameExercise: function (id, name) {
+      var ex = getExercise(id);
+      if (ex) { ex.name = name; save(); }
+    },
+    updateExercise: function (id, fields) {
+      var ex = getExercise(id);
+      if (!ex) return;
+      Object.keys(fields).forEach(function (k) { ex[k] = fields[k]; });
+      save();
+    },
+    /* 指定部位の種目を orderedIds の順に並べ替える（他部位の位置は保持） */
+    reorderWithinPart: function (part, orderedIds) {
+      var orderMap = {};
+      orderedIds.forEach(function (id, i) { orderMap[id] = i; });
+      var partItems = state.exercises.filter(function (x) { return x.part === part; });
+      partItems.sort(function (a, b) {
+        var ai = (orderMap[a.id] == null) ? 9999 : orderMap[a.id];
+        var bi = (orderMap[b.id] == null) ? 9999 : orderMap[b.id];
+        return ai - bi;
+      });
+      var k = 0;
+      state.exercises = state.exercises.map(function (x) {
+        return x.part === part ? partItems[k++] : x;
+      });
+      save();
+    },
+    deleteExercise: function (id) {
+      state.exercises = state.exercises.filter(function (x) { return x.id !== id; });
+      save();
+    },
+
+    /* ---- ワークアウト ---- */
+    getWorkout: getWorkout,
+    deleteWorkout: function (date) { delete state.workouts[date]; save(); },
+    addEntry: function (date, exId) {
+      var ex = getExercise(exId);
+      if (!ex) return null;
+      var w = ensure(date);
+      // 種目名・部位・器具は記録時点の値を保持（種目マスタから削除しても履歴が壊れない）
+      var entry = { id: uid(), exId: exId, name: ex.name, part: ex.part, equip: ex.equip || '', sets: [] };
+      // 前回の記録があれば全セットを引き継ぎ、最低3セット分の行を用意する
+      var prev = prevRecord(exId, date);
+      if (prev) {
+        prev.sets.forEach(function (s) { entry.sets.push({ w: s.w, r: s.r }); });
+      }
+      while (entry.sets.length < 3) {
+        var pad = entry.sets.length ? entry.sets[entry.sets.length - 1] : null;
+        entry.sets.push(pad ? { w: pad.w, r: pad.r } : { w: '', r: '' });
+      }
+      w.entries.push(entry);
+      save();
+      return entry;
+    },
+    removeEntry: function (date, entryId) {
+      var w = getWorkout(date);
+      if (!w) return;
+      w.entries = w.entries.filter(function (e) { return e.id !== entryId; });
+      save();
+    },
+    addSet: function (date, entryId) {
+      var e = findEntry(date, entryId);
+      if (!e) return;
+      var last = e.sets[e.sets.length - 1];
+      if (!last) {
+        var prev = prevRecord(e.exId, date);
+        last = prev ? prev.sets[prev.sets.length - 1] : null;
+      }
+      e.sets.push(last ? { w: last.w, r: last.r } : { w: '', r: '' });
+      save();
+    },
+    getSet: function (date, entryId, idx) {
+      var e = findEntry(date, entryId);
+      return e ? (e.sets[idx] || null) : null;
+    },
+    updateSet: function (date, entryId, idx, field, val) {
+      var e = findEntry(date, entryId);
+      if (e && e.sets[idx]) { e.sets[idx][field] = val; save(); }
+    },
+    removeSet: function (date, entryId, idx) {
+      var e = findEntry(date, entryId);
+      if (e) { e.sets.splice(idx, 1); save(); }
+    },
+    setMemo: function (date, text) { ensure(date).memo = text; save(); },
+    prevRecord: prevRecord,
+
+    /* ---- 集計・ユーティリティ ---- */
+    datesWithData: function () {
+      return Object.keys(state.workouts).filter(function (d) {
+        var w = state.workouts[d];
+        return (w.entries && w.entries.length) || w.memo || w.condition;
+      }).sort();
+    },
+    sizeKB: function () {
+      try { return (JSON.stringify(state).length / 1024).toFixed(1); } catch (e) { return '?'; }
+    },
+    wipe: function () {
+      try { localStorage.removeItem(KEY); } catch (e) { /* noop */ }
+      load();
+    }
+  };
+})();

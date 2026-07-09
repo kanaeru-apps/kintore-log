@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<title>筋トレ記録</title>
+<meta name="theme-color" content="#0b0c0f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="筋トレ記録">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <main>
+
+    <!-- ============ 記録 ============ -->
+    <section id="view-log" class="view active">
+      <header class="log-header">
+        <p class="eyebrow" id="eyebrow">TRAINING LOG</p>
+        <div class="date-nav">
+          <button class="nav-arrow" id="prevDay" aria-label="前の日">‹</button>
+          <button id="dateLabel" class="num" aria-label="日付を選択"></button>
+          <button class="nav-arrow" id="nextDay" aria-label="次の日">›</button>
+        </div>
+        <button id="todayBtn" class="today-btn">◎ 今日へ戻る</button>
+        <input type="date" id="datePicker" class="hidden-input" tabindex="-1" aria-hidden="true">
+      </header>
+
+      <div id="dayStats" class="day-stats"></div>
+      <div id="entries"></div>
+
+      <button id="addExerciseBtn" class="btn primary">＋ 種目を追加</button>
+      <textarea id="dayMemo" class="memo" rows="2" placeholder="メモ（自由記載）"></textarea>
+    </section>
+
+    <!-- ============ 履歴 ============ -->
+    <section id="view-history" class="view">
+      <header class="page-header"><p class="eyebrow">HISTORY</p><h2>履歴</h2></header>
+      <div id="historyList"></div>
+    </section>
+
+    <!-- ============ グラフ ============ -->
+    <section id="view-charts" class="view">
+      <header class="page-header"><p class="eyebrow">ANALYTICS</p><h2>グラフ・レポート</h2></header>
+      <div class="placeholder">
+        <div class="ph-icon">📈</div>
+        <h3>Phase 3 で実装予定</h3>
+        <p>種目別の重量推移・推定1RM・<br>部位別ボリュームの週次/月次レポートが<br>ここに表示されます。</p>
+      </div>
+    </section>
+
+    <!-- ============ タイマー ============ -->
+    <section id="view-timer" class="view">
+      <header class="page-header"><p class="eyebrow">INTERVAL</p><h2>タイマー</h2></header>
+      <div class="placeholder">
+        <div class="ph-icon">⏱️</div>
+        <h3>Phase 2 で実装予定</h3>
+        <p>セット間のインターバルタイマーが<br>ここに表示されます。</p>
+      </div>
+    </section>
+
+    <!-- ============ RM計算機 ============ -->
+    <section id="view-calc" class="view">
+      <header class="page-header"><p class="eyebrow">RM CALCULATOR</p><h2>RM計算機</h2></header>
+
+      <div class="calc-card">
+        <div class="calc-weight-row">
+          <span class="calc-label">WEIGHT</span>
+          <span class="calc-weight num" id="calcWeightVal">60.0<small> kg</small></span>
+        </div>
+        <div class="dial">
+          <div class="dial-pointer"></div>
+          <div class="dial-scroll" id="dialScroll"><div class="dial-track" id="dialTrack"></div></div>
+        </div>
+        <div class="calc-reps-row">
+          <span class="calc-label">REPS</span>
+          <button id="repsMinus" class="reps-btn" aria-label="回数を減らす">−</button>
+          <span class="calc-reps num" id="calcRepsVal">1</span>
+          <button id="repsPlus" class="reps-btn" aria-label="回数を増やす">＋</button>
+        </div>
+      </div>
+
+      <div id="calcTable" class="panel-list rm-table"></div>
+      <p class="calc-note">1RM換算：重量 × (1 + 0.0244 × (回数 − 1)) による推定値です。<br>実際に挙げられる重量とは異なる場合があります。</p>
+    </section>
+
+    <!-- ============ 設定 ============ -->
+    <section id="view-settings" class="view">
+      <header class="page-header"><p class="eyebrow">SETTINGS</p><h2>設定</h2></header>
+
+      <div class="s-section">
+        <h4 class="s-title">種目管理</h4>
+        <div class="add-ex-form">
+          <input id="newExName" type="text" placeholder="新しい種目名">
+          <div class="add-ex-row">
+            <select id="newExPart" aria-label="部位"></select>
+            <select id="newExEquip" aria-label="器具"></select>
+            <button id="addExBtn" class="btn primary small">追加</button>
+          </div>
+        </div>
+        <div id="exList"></div>
+      </div>
+
+      <div class="s-section">
+        <h4 class="s-title">データ</h4>
+        <div class="panel-list">
+          <div class="s-row">
+            <div class="s-main"><b>CSVエクスポート</b><small>全記録をExcelで開けるCSVで保存</small></div>
+            <button class="link" id="exportCsvBtn">書き出す</button>
+          </div>
+          <div class="s-row">
+            <div class="s-main"><b>保存データ量</b><small id="storageInfo"></small></div>
+          </div>
+          <div class="s-row">
+            <div class="s-main"><b>全データ削除</b><small>記録と種目をすべて消去します</small></div>
+            <button class="link danger" id="wipeBtn">削除</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="s-section">
+        <h4 class="s-title">連携（Phase 4）</h4>
+        <div class="panel-list">
+          <div class="s-row disabled">
+            <div class="s-main"><b>Googleスプレッドシート連携</b><small>準備中：記録を自動でスプレッドシートに同期</small></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="version">筋トレ記録 v0.1.6 — Phase 1</p>
+    </section>
+
+  </main>
+
+  <!-- 下部タブバー -->
+  <nav id="tabbar">
+    <button data-tab="log" class="active" aria-label="記録">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2.5 12h2M19.5 12h2M6.5 7.5v9M17.5 7.5v9M9.5 9.5v5M14.5 9.5v5M9.5 12h5"/></svg>
+      <span>記録</span>
+    </button>
+    <button data-tab="history" aria-label="履歴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+      <span>履歴</span>
+    </button>
+    <button data-tab="charts" aria-label="グラフ">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20h16M7 16.5v-6M12 16.5V6.5M17 16.5v-3"/></svg>
+      <span>グラフ</span>
+    </button>
+    <button data-tab="timer" aria-label="タイマー">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2.2 1.5M10 2.5h4"/></svg>
+      <span>タイマー</span>
+    </button>
+    <button data-tab="calc" aria-label="RM計算機">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="5.5" y="3" width="13" height="18" rx="2.5"/><path d="M9 7.5h6M9 12h.01M12 12h.01M15 12h.01M9 15.2h.01M12 15.2h.01M15 15.2h.01M9 18.4h.01M12 18.4h.01M15 18.4h.01"/></svg>
+      <span>計算機</span>
+    </button>
+    <button data-tab="settings" aria-label="設定">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.5M12 18v2.5M3.5 12H6M18 12h2.5M6 6l1.8 1.8M16.2 16.2 18 18M18 6l-1.8 1.8M7.8 16.2 6 18"/></svg>
+      <span>設定</span>
+    </button>
+  </nav>
+
+  <!-- 種目選択シート -->
+  <div id="backdrop"></div>
+  <div id="sheet" role="dialog" aria-label="種目を選択">
+    <div class="grabber"></div>
+    <div class="sheet-head"><h3 id="sheetHeadTitle">種目を追加</h3><button id="sheetClose" class="icon-btn" aria-label="閉じる">✕</button></div>
+    <div id="partChips" class="part-chips"></div>
+    <div id="sheetEditBar" class="sheet-edit-bar">
+      <span>≡ を上下にドラッグして並べ替え</span>
+      <button id="sheetEditDone" class="btn primary small">完了</button>
+    </div>
+    <div id="sheetList" class="sheet-list"></div>
+    <div class="new-ex">
+      <input id="sheetNewName" type="text" placeholder="リストにない種目名を入力…">
+      <div class="new-ex-row">
+        <select id="sheetNewEquip" aria-label="器具"></select>
+        <button id="sheetNewAdd" class="btn primary small">作成して追加</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 種目情報モーダル（人体図・動画リンク・メモ） -->
+  <div id="exModalBackdrop"></div>
+  <div id="exModal" role="dialog" aria-label="種目の情報">
+    <div class="modal-head">
+      <div id="exModalTitle"></div>
+      <button id="exModalClose" class="icon-btn" aria-label="閉じる">✕</button>
+    </div>
+    <div id="exModalBody"></div>
+  </div>
+
+  <!-- 重量ドラムロールピッカー -->
+  <div id="drumBackdrop"></div>
+  <div id="drumSheet" role="dialog" aria-label="重量を選択">
+    <div class="drum-head">
+      <button id="drumCancel" class="drum-cancel">キャンセル</button>
+      <span id="drumTitle" class="drum-title"></span>
+      <button id="drumDone" class="drum-done">完了</button>
+    </div>
+    <div class="drum-hint"><span>▲ 軽く</span><span>重く ▼</span></div>
+    <div class="drum-wrap">
+      <div class="drum-highlight"></div>
+      <span class="drum-unit">kg</span>
+      <div class="drum-scroll" id="drumScroll"><div class="drum-list" id="drumList"></div></div>
+    </div>
+  </div>
+
+  <div id="toast" role="status"></div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+<script>
+if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+  navigator.serviceWorker.register('./sw.js').catch(function () {});
+}
+</script>
+</body>
+</html>
