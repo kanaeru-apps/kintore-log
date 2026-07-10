@@ -1,5 +1,5 @@
-/* 筋トレ記録 Service Worker — オフラインキャッシュ */
-const CACHE = 'kintore-v1';
+/* 筋トレ記録 Service Worker — ネットワーク優先＋オフラインフォールバック */
+const CACHE = 'kintore-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -25,18 +25,22 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+/* 同一オリジンのGETはネットワーク優先。取得できたら最新をキャッシュ更新し、
+   オフライン等で失敗したときだけキャッシュを返す（＝更新が確実に反映される）。 */
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  if (req.url.indexOf(self.location.origin) !== 0) return;
+
   e.respondWith(
-    caches.match(e.request).then((hit) => {
-      if (hit) return hit;
-      return fetch(e.request).then((res) => {
-        if (res.ok && e.request.url.indexOf(self.location.origin) === 0) {
+    fetch(req)
+      .then((res) => {
+        if (res && res.ok) {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
+          caches.open(CACHE).then((c) => c.put(req, copy));
         }
         return res;
-      });
-    })
+      })
+      .catch(() => caches.match(req).then((hit) => hit || caches.match('./index.html')))
   );
 });
