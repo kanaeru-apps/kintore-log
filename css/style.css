@@ -1156,7 +1156,14 @@ input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
   white-space: nowrap;
 }
 #view-timer.finished .tr-time { color: var(--volt); }
-#view-timer.finished .tr-label { color: var(--volt); font-weight: 700; }
+#view-timer.finished .tr-label {
+  color: var(--volt);
+  font-family: var(--font-num);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  transform: translate(-50%, 26px);
+}
 #view-timer.finished .ring-fg { stroke: var(--volt); }
 
 .tr-controls { display: flex; gap: 8px; width: 100%; }

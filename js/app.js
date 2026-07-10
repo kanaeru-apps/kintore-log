@@ -1036,7 +1036,7 @@
   var timer = {
     total: 0, endAt: 0, remaining: 0,
     running: false, paused: false, finished: false,
-    tick: null, wakeLock: null, audioCtx: null,
+    tick: null, wakeLock: null, audioCtx: null, beepNodes: [],
     notifyAsked: false, customMin: 3,
     twBuilt: false, twBound: false, twSel: -1
   };
@@ -1095,18 +1095,36 @@
       var ctx = timer.audioCtx;
       if (!ctx) return;
       if (ctx.state === 'suspended') ctx.resume();
+      stopBeep();
       var t0 = ctx.currentTime;
-      [0, 0.32, 0.64].forEach(function (off) {
+      var interval = 0.5, count = 11; // 約5秒間（0〜5.0秒に0.5秒間隔でビープ）
+      for (var i = 0; i < count; i++) {
+        var off = i * interval;
         var o = ctx.createOscillator(), g = ctx.createGain();
         o.type = 'sine';
-        o.frequency.value = 880;
+        o.frequency.value = (i % 2 === 0) ? 880 : 988;
         g.gain.setValueAtTime(0.0001, t0 + off);
         g.gain.exponentialRampToValueAtTime(0.4, t0 + off + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.26);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.32);
         o.connect(g); g.connect(ctx.destination);
-        o.start(t0 + off); o.stop(t0 + off + 0.28);
-      });
+        o.start(t0 + off);
+        o.stop(t0 + off + 0.34);
+        timer.beepNodes.push(o);
+      }
     } catch (e) { /* noop */ }
+  }
+  function stopBeep() {
+    (timer.beepNodes || []).forEach(function (o) { try { o.stop(); o.disconnect(); } catch (e) { /* noop */ } });
+    timer.beepNodes = [];
+  }
+  /* バイブ（対応端末のみ。iPhoneのSafari/PWAは非対応のため無効） */
+  function vibrateAlarm() {
+    try {
+      if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400]);
+    } catch (e) { /* noop */ }
+  }
+  function stopVibrate() {
+    try { if (navigator.vibrate) navigator.vibrate(0); } catch (e) { /* noop */ }
   }
 
   /* ---- OS通知（許可時のみ）・バッジ ---- */
@@ -1156,6 +1174,8 @@
     unlockAudio();
     askNotify();
     clearBadge();
+    stopBeep();
+    stopVibrate();
     timer.total = seconds;
     timer.endAt = Date.now() + seconds * 1000;
     timer.remaining = seconds;
@@ -1175,6 +1195,7 @@
     timer.remaining = 0;
     releaseWakeLock();
     playBeep();
+    vibrateAlarm();
     showTimerNotification();
     setBadge();
     setTimerView('finished');
@@ -1204,6 +1225,8 @@
   }
   function resetTimer() {
     stopTick();
+    stopBeep();
+    stopVibrate();
     timer.running = false; timer.paused = false; timer.finished = false;
     releaseWakeLock();
     clearBadge();
@@ -1232,7 +1255,7 @@
       ringEl.style.strokeDashoffset = (C * (1 - prog)).toFixed(1);
     }
     var labelEl = $('#trLabel');
-    if (labelEl) labelEl.textContent = timer.finished ? '終了！ お疲れさまでした' : (timer.paused ? '一時停止中' : '残り');
+    if (labelEl) labelEl.textContent = timer.finished ? 'TIME UP' : (timer.paused ? '一時停止中' : '残り');
 
     var pause = $('#trPause'), plus = $('#trPlus30'), again = $('#trAgain'), reset = $('#trReset');
     if (pause) { pause.style.display = timer.finished ? 'none' : ''; pause.textContent = timer.paused ? '再開' : '一時停止'; }
