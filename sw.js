@@ -1,5 +1,5 @@
 /* 筋トレ記録 Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v2';
+const CACHE = 'kintore-v3';
 const ASSETS = [
   './',
   './index.html',

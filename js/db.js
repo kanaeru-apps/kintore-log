@@ -10,6 +10,9 @@ var DB = (function () {
   var KEY = 'kintore_v1';
   var PARTS = ['胸', '背中', '脚', '肩', '腕', '腹', '有酸素', 'その他'];
   var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重'];
+  var CARDIO_PART = '有酸素';
+  /* 有酸素セットのフィールド：時間(t/分)・距離(d/km)・速度(sp/km/h)・傾斜(inc/%)・カロリー(cal/kcal)・心拍(hr/bpm) */
+  var CARDIO_KEYS = ['t', 'd', 'sp', 'inc', 'cal', 'hr'];
   var DEFAULTS = [
     ['ベンチプレス', '胸', 'バーベル'], ['ダンベルプレス', '胸', 'ダンベル'], ['インクラインベンチプレス', '胸', 'バーベル'], ['ダンベルフライ', '胸', 'ダンベル'], ['チェストプレス', '胸', 'マシン'],
     ['デッドリフト', '背中', 'バーベル'], ['ラットプルダウン', '背中', 'マシン'], ['ベントオーバーロー', '背中', 'バーベル'], ['シーテッドロー', '背中', 'ケーブル'], ['懸垂', '背中', '自重'],
@@ -24,6 +27,27 @@ var DB = (function () {
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  function isCardioPart(part) { return part === CARDIO_PART; }
+  function cp(v) { return v == null ? '' : v; }
+  /* 部位に応じた空セット（有酸素は6項目、それ以外は重量×回数） */
+  function emptySet(part) {
+    if (isCardioPart(part)) {
+      var s = {};
+      CARDIO_KEYS.forEach(function (k) { s[k] = ''; });
+      return s;
+    }
+    return { w: '', r: '' };
+  }
+  /* 前回値の引き継ぎ・セット追加時に既存セットを複製する（部位で形が異なる） */
+  function copySet(part, s) {
+    if (isCardioPart(part)) {
+      var out = {};
+      CARDIO_KEYS.forEach(function (k) { out[k] = cp(s[k]); });
+      return out;
+    }
+    return { w: cp(s.w), r: cp(s.r) };
   }
 
   function save() {
@@ -170,14 +194,16 @@ var DB = (function () {
       var w = ensure(date);
       // 種目名・部位・器具は記録時点の値を保持（種目マスタから削除しても履歴が壊れない）
       var entry = { id: uid(), exId: exId, name: ex.name, part: ex.part, equip: ex.equip || '', sets: [] };
-      // 前回の記録があれば全セットを引き継ぎ、最低3セット分の行を用意する
+      // 前回の記録があれば全セットを引き継ぐ。無ければ既定の行数を用意する
+      // （筋トレ=3セット、有酸素=1セッション。有酸素は「＋セッション追加」で増やせる）
+      var minRows = isCardioPart(ex.part) ? 1 : 3;
       var prev = prevRecord(exId, date);
       if (prev) {
-        prev.sets.forEach(function (s) { entry.sets.push({ w: s.w, r: s.r }); });
+        prev.sets.forEach(function (s) { entry.sets.push(copySet(ex.part, s)); });
       }
-      while (entry.sets.length < 3) {
+      while (entry.sets.length < minRows) {
         var pad = entry.sets.length ? entry.sets[entry.sets.length - 1] : null;
-        entry.sets.push(pad ? { w: pad.w, r: pad.r } : { w: '', r: '' });
+        entry.sets.push(pad ? copySet(ex.part, pad) : emptySet(ex.part));
       }
       w.entries.push(entry);
       save();
@@ -197,7 +223,7 @@ var DB = (function () {
         var prev = prevRecord(e.exId, date);
         last = prev ? prev.sets[prev.sets.length - 1] : null;
       }
-      e.sets.push(last ? { w: last.w, r: last.r } : { w: '', r: '' });
+      e.sets.push(last ? copySet(e.part, last) : emptySet(e.part));
       save();
     },
     getSet: function (date, entryId, idx) {

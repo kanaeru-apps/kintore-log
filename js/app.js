@@ -9,6 +9,17 @@
 
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
   var PART_CLASS = { '胸': 'chest', '背中': 'back', '脚': 'leg', '肩': 'shoulder', '腕': 'arm', '腹': 'core', '有酸素': 'cardio', 'その他': 'etc' };
+  var CARDIO_PART = '有酸素';
+  /* 有酸素カードで表示する記録項目（キーはdb.jsのCARDIO_KEYSと一致させる） */
+  var CARDIO_FIELDS = [
+    { k: 't', label: '時間', unit: '分', step: '1' },
+    { k: 'd', label: '距離', unit: 'km', step: '0.1' },
+    { k: 'sp', label: '速度', unit: 'km/h', step: '0.1' },
+    { k: 'inc', label: '傾斜', unit: '%', step: '1' },
+    { k: 'cal', label: 'カロリー', unit: 'kcal', step: '1' },
+    { k: 'hr', label: '心拍', unit: 'bpm', step: '1' }
+  ];
+  function isCardio(e) { return e && e.part === CARDIO_PART; }
 
   var ui = { tab: 'log', date: DB.todayStr(), pickerPart: '胸', expanded: {}, sheetEdit: false };
 
@@ -37,23 +48,37 @@
   function workoutVol(w) {
     return (w.entries || []).reduce(function (a, e) { return a + setVol(e.sets); }, 0);
   }
-  /* 重量か回数が入力されたセットだけを「実施セット」として数える */
+  /* 何か1項目でも入力されたセットだけを「実施セット」として数える（有酸素は6項目のいずれか） */
   function filledSets(e) {
+    if (isCardio(e)) {
+      return e.sets.filter(function (s) {
+        return CARDIO_FIELDS.some(function (f) { return (+s[f.k] || 0) > 0; });
+      });
+    }
     return e.sets.filter(function (s) { return (+s.w || 0) > 0 || (+s.r || 0) > 0; });
   }
   function workoutSets(w) {
     return (w.entries || []).reduce(function (a, e) { return a + filledSets(e).length; }, 0);
   }
   function dayStats(w) {
-    var st = { ex: 0, sets: 0, reps: 0, vol: 0 };
+    var st = { ex: 0, sets: 0, reps: 0, vol: 0, time: 0, dist: 0, hasStr: false, hasCardio: false };
     ((w && w.entries) || []).forEach(function (e) {
       var f = filledSets(e);
       if (f.length) st.ex++;
       st.sets += f.length;
-      f.forEach(function (s) {
-        st.reps += (+s.r || 0);
-        st.vol += (+s.w || 0) * (+s.r || 0);
-      });
+      if (isCardio(e)) {
+        if (f.length) st.hasCardio = true;
+        f.forEach(function (s) {
+          st.time += (+s.t || 0);
+          st.dist += (+s.d || 0);
+        });
+      } else {
+        if (f.length) st.hasStr = true;
+        f.forEach(function (s) {
+          st.reps += (+s.r || 0);
+          st.vol += (+s.w || 0) * (+s.r || 0);
+        });
+      }
     });
     return st;
   }
@@ -329,13 +354,13 @@
     var memoEl = $('#dayMemo');
     if (document.activeElement !== memoEl) memoEl.value = (w && w.memo) ? w.memo : '';
 
-    // サマリータイル
+    // サマリータイル（内容がある種類だけ表示。筋トレ=レップ/負荷量、有酸素=時間/距離）
     var st = dayStats(w);
-    $('#dayStats').innerHTML =
-      statTile('合計種目数', st.ex) +
-      statTile('合計セット数', st.sets) +
-      statTile('合計レップ数', st.reps) +
-      statTile('合計負荷量', fmtNum(st.vol), 'kg');
+    var tiles = statTile('合計種目数', st.ex) + statTile('合計セット数', st.sets);
+    if (st.hasStr) tiles += statTile('合計レップ数', st.reps) + statTile('合計負荷量', fmtNum(st.vol), 'kg');
+    if (st.hasCardio) tiles += statTile('合計時間', fmtNum(st.time), '分') + statTile('合計距離', fmtNum(st.dist), 'km');
+    if (!st.hasStr && !st.hasCardio) tiles += statTile('合計レップ数', 0) + statTile('合計負荷量', 0, 'kg');
+    $('#dayStats').innerHTML = tiles;
 
     // 種目カード
     var entries = (w && w.entries) || [];
@@ -348,13 +373,38 @@
   }
 
   function entryHtml(e, i) {
-    var prevHtml = '';
+    return isCardio(e) ? cardioEntryHtml(e, i) : strengthEntryHtml(e, i);
+  }
+
+  /* カード見出し（部位チップ・種目名・削除ボタン）は共通 */
+  function entryHead(e) {
+    return '<div class="entry-head">' + partChip(e.part) +
+      '<h3 data-action="ex-info">' + esc(e.name) + equipTag(e.equip) + '<span class="info-hint">ⓘ</span></h3>' +
+      '<button class="link danger" data-action="del-entry">削除</button></div>';
+  }
+
+  /* 前回記録の参考表示（部位で表示内容を変える） */
+  function prevLine(e) {
     var prev = DB.prevRecord(e.exId, ui.date);
-    if (prev) {
-      var pd = parseDate(prev.date);
-      prevHtml = '<p class="prev"><span>前回 ' + (pd.getMonth() + 1) + '/' + pd.getDate() + '</span>' +
-        prev.sets.map(function (s) { return esc(s.w || 0) + '×' + esc(s.r || 0); }).join(' / ') + '</p>';
+    if (!prev) return '';
+    var pd = parseDate(prev.date);
+    var body;
+    if (isCardio(e)) {
+      body = prev.sets.map(function (s) {
+        var parts = [];
+        if (+s.t) parts.push(esc(s.t) + '分');
+        if (+s.d) parts.push(esc(s.d) + 'km');
+        if (+s.cal) parts.push(esc(s.cal) + 'kcal');
+        return parts.join(' ') || '—';
+      }).join(' / ');
+    } else {
+      body = prev.sets.map(function (s) { return esc(s.w || 0) + '×' + esc(s.r || 0); }).join(' / ');
     }
+    return '<p class="prev"><span>前回 ' + (pd.getMonth() + 1) + '/' + pd.getDate() + '</span>' + body + '</p>';
+  }
+
+  /* 筋トレ種目：重量kg × 回数 */
+  function strengthEntryHtml(e, i) {
     var rows = e.sets.map(function (s, idx) {
       return '<div class="set-row" data-idx="' + idx + '">' +
         '<span class="set-no num">' + (idx + 1) + '</span>' +
@@ -375,13 +425,48 @@
     }).join('');
 
     return '<article class="entry" data-entry="' + e.id + '" style="animation-delay:' + Math.min(i * 50, 300) + 'ms">' +
-      '<div class="entry-head">' + partChip(e.part) + '<h3 data-action="ex-info">' + esc(e.name) + equipTag(e.equip) + '<span class="info-hint">ⓘ</span></h3>' +
-        '<button class="link danger" data-action="del-entry">削除</button></div>' +
-      prevHtml +
+      entryHead(e) +
+      prevLine(e) +
       '<div class="sets">' + rows + '</div>' +
       '<div class="entry-foot">' +
         '<button class="btn ghost small" data-action="add-set">＋ セット追加</button>' +
         '<span class="vol">VOL <b class="num">' + fmtNum(setVol(e.sets)) + '</b> kg</span>' +
+      '</div>' +
+    '</article>';
+  }
+
+  /* 有酸素種目：時間・距離・速度・傾斜・カロリー・心拍 */
+  function cardioEntryHtml(e, i) {
+    var rows = e.sets.map(function (s, idx) {
+      var cells = CARDIO_FIELDS.map(function (f) {
+        return '<label class="cf">' +
+          '<span class="cf-label">' + f.label + '</span>' +
+          '<span class="cf-inputwrap">' +
+            '<input type="number" inputmode="decimal" step="' + f.step + '" min="0" data-field="' + f.k + '" value="' + esc(s[f.k]) + '" placeholder="0">' +
+            '<span class="cf-unit">' + f.unit + '</span>' +
+          '</span>' +
+        '</label>';
+      }).join('');
+      return '<div class="cardio-set" data-idx="' + idx + '">' +
+        '<div class="cardio-set-head">' +
+          '<span class="set-no num">' + (idx + 1) + '</span>' +
+          '<span class="cardio-set-label">セッション ' + (idx + 1) + '</span>' +
+          '<button class="set-del" data-action="del-set" aria-label="セッション削除">✕</button>' +
+        '</div>' +
+        '<div class="cardio-grid">' + cells + '</div>' +
+      '</div>';
+    }).join('');
+
+    var totT = 0, totD = 0;
+    e.sets.forEach(function (s) { totT += (+s.t || 0); totD += (+s.d || 0); });
+
+    return '<article class="entry" data-entry="' + e.id + '" style="animation-delay:' + Math.min(i * 50, 300) + 'ms">' +
+      entryHead(e) +
+      prevLine(e) +
+      '<div class="sets cardio-sets">' + rows + '</div>' +
+      '<div class="entry-foot">' +
+        '<button class="btn ghost small" data-action="add-set">＋ セッション追加</button>' +
+        '<span class="vol">計 <b class="num">' + fmtNum(totT) + '</b>分 · <b class="num">' + fmtNum(totD) + '</b>km</span>' +
       '</div>' +
     '</article>';
   }
@@ -414,7 +499,7 @@
       var entryEl = e.target.closest('.entry');
       if (!entryEl) return;
       var id = entryEl.dataset.entry;
-      var rowEl = e.target.closest('.set-row');
+      var rowEl = e.target.closest('[data-idx]');
       var idx = rowEl ? +rowEl.dataset.idx : -1;
       var a = btn.dataset.action;
 
@@ -454,7 +539,7 @@
       var input = e.target.closest('input[data-field]');
       if (!input) return;
       var entryEl = e.target.closest('.entry');
-      var rowEl = e.target.closest('.set-row');
+      var rowEl = e.target.closest('[data-idx]');
       if (!entryEl || !rowEl) return;
       var v = (input.value === '') ? '' : Math.max(0, parseFloat(input.value) || 0);
       DB.updateSet(ui.date, entryEl.dataset.entry, +rowEl.dataset.idx, input.dataset.field, v);
@@ -683,7 +768,18 @@
 
   function hBodyHtml(w) {
     var rows = (w.entries || []).map(function (e) {
-      var setsStr = e.sets.map(function (s) { return (s.w || 0) + '×' + (s.r || 0); }).join(' / ') || '—';
+      var setsStr;
+      if (isCardio(e)) {
+        setsStr = e.sets.map(function (s) {
+          var parts = [];
+          if (+s.t) parts.push(s.t + '分');
+          if (+s.d) parts.push(s.d + 'km');
+          if (+s.cal) parts.push(s.cal + 'kcal');
+          return parts.join(' ') || '—';
+        }).join(' / ') || '—';
+      } else {
+        setsStr = e.sets.map(function (s) { return (s.w || 0) + '×' + (s.r || 0); }).join(' / ') || '—';
+      }
       return '<div class="h-entry">' + partChip(e.part) + '<b>' + esc(e.name) + '</b>' + equipTag(e.equip) +
         '<span class="h-sets">' + esc(setsStr) + '</span></div>';
     }).join('');
@@ -808,22 +904,32 @@
   function exportCSV() {
     var dates = DB.datesWithData();
     if (!dates.length) { toast('書き出す記録がありません'); return; }
-    var head = ['日付', '曜日', '部位', '種目', '器具', 'セット', '重量kg', '回数', 'ボリュームkg', 'メモ'];
+    var head = ['日付', '曜日', '部位', '種目', '器具', 'セット',
+      '重量kg', '回数', 'ボリュームkg',
+      '時間min', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ'];
     var lines = [head.join(',')];
     var csv = function (v) {
       v = String(v == null ? '' : v);
       return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
     };
+    var val = function (x) { return (x === '' || x == null) ? '' : x; };
     dates.forEach(function (date) {
       var w = DB.getWorkout(date);
       var d = parseDate(date);
       (w.entries || []).forEach(function (e) {
+        var cardio = isCardio(e);
         e.sets.forEach(function (s, i) {
           lines.push([
             date, WD[d.getDay()], e.part, e.name, e.equip || '', i + 1,
-            s.w === '' ? '' : s.w,
-            s.r === '' ? '' : s.r,
-            (+s.w || 0) * (+s.r || 0),
+            cardio ? '' : val(s.w),
+            cardio ? '' : val(s.r),
+            cardio ? '' : (+s.w || 0) * (+s.r || 0),
+            cardio ? val(s.t) : '',
+            cardio ? val(s.d) : '',
+            cardio ? val(s.sp) : '',
+            cardio ? val(s.inc) : '',
+            cardio ? val(s.cal) : '',
+            cardio ? val(s.hr) : '',
             w.memo || ''
           ].map(csv).join(','));
         });
