@@ -1221,6 +1221,8 @@
     timer.total += sec;
     if (timer.paused) timer.remaining += sec;
     else { timer.endAt += sec * 1000; timer.remaining = (timer.endAt - Date.now()) / 1000; }
+    // −30秒で残りが尽きたら終了扱い（一時停止中はtickが動かないためここで確定させる）
+    if (timer.remaining <= 0) { finishTimer(); return; }
     renderTimer();
   }
   function resetTimer() {
@@ -1257,8 +1259,9 @@
     var labelEl = $('#trLabel');
     if (labelEl) labelEl.textContent = timer.finished ? 'TIME UP' : (timer.paused ? '一時停止中' : '残り');
 
-    var pause = $('#trPause'), plus = $('#trPlus30'), again = $('#trAgain'), reset = $('#trReset');
+    var pause = $('#trPause'), minus = $('#trMinus30'), plus = $('#trPlus30'), again = $('#trAgain'), reset = $('#trReset');
     if (pause) { pause.style.display = timer.finished ? 'none' : ''; pause.textContent = timer.paused ? '再開' : '一時停止'; }
+    if (minus) minus.style.display = timer.finished ? 'none' : '';
     if (plus) plus.style.display = timer.finished ? 'none' : '';
     if (again) again.style.display = timer.finished ? '' : 'none';
     if (reset) reset.textContent = timer.finished ? '閉じる' : 'リセット';
@@ -1310,6 +1313,7 @@
     });
     $('#twStart').addEventListener('click', function () { saveCustomMin(); startTimer(timer.customMin * 60); });
     $('#trPause').addEventListener('click', pauseResumeTimer);
+    $('#trMinus30').addEventListener('click', function () { addTime(-30); });
     $('#trPlus30').addEventListener('click', function () { addTime(30); });
     $('#trAgain').addEventListener('click', againTimer);
     $('#trReset').addEventListener('click', resetTimer);
