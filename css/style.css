@@ -347,10 +347,12 @@ input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
 .cardio-set-head .set-del { height: auto; line-height: 1; }
 .cardio-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0,1fr) にしないと 1fr(=minmax(auto,1fr)) の auto 最小値が
+     数値入力の中身に引きずられてカラムが縮まず、カード外へはみ出す */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px 10px;
 }
-.cf { display: flex; flex-direction: column; gap: 4px; }
+.cf { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .cf-label { font-size: 11px; color: var(--dim); padding-left: 2px; }
 .cf-inputwrap {
   display: flex;
