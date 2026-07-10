@@ -860,6 +860,8 @@ input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
 .dial::after { right: 0; background: linear-gradient(-90deg, var(--panel), transparent); }
 .dial-scroll {
   overflow-x: auto;
+  overflow-y: hidden;          /* 縦スクロール/バウンスを無効化（横スクロール限定）→ 数字が上下に消えるのを防ぐ */
+  overscroll-behavior: contain;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   padding: 13px 50% 0;
@@ -874,10 +876,13 @@ input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
 .dial-track {
   position: relative;
   height: 46px;
+  /* 目盛りは 1kg(60px)ごとの長い線＋0.5kg(30px)ごとの短い線のみ。
+     以前は0.1kg(6px)刻みの細い線を敷いていたが、間隔が細かすぎて
+     高DPR＋スクロールの小数ピクセルずれでモアレ（変な棒）が出ていた */
   background:
     repeating-linear-gradient(90deg, #4a505a 0 2px, transparent 2px 60px),
-    repeating-linear-gradient(90deg, #2c313b 0 1px, transparent 1px 6px);
-  background-size: 100% 24px, 100% 14px;
+    repeating-linear-gradient(90deg, #2c313b 0 2px, transparent 2px 30px);
+  background-size: 100% 22px, 100% 12px;
   background-repeat: no-repeat;
 }
 .dial-num {
