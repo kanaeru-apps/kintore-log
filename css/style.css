@@ -367,6 +367,7 @@ input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
 /* ---------------- 空状態・プレースホルダー ---------------- */
 .empty, .placeholder { text-align: center; padding: 56px 20px 40px; color: var(--dim); }
 .ph-icon { font-size: 52px; margin-bottom: 12px; filter: saturate(0.8); }
+.ph-icon .dumbbell-ic { width: 108px; height: auto; display: block; margin: 0 auto; filter: none; }
 .placeholder h3 { font-size: 16px; color: var(--text); margin-bottom: 8px; }
 .placeholder p, .empty p { font-size: 13px; line-height: 1.9; }
 

@@ -68,6 +68,24 @@
       return '<option value="' + esc(q) + '">' + esc(q) + '</option>';
     }).join('');
   }
+  /* ---------- ダンベルSVG（空状態アイコン・ソリッド） ---------- */
+  function dumbbellSvg() {
+    return '<svg class="dumbbell-ic" viewBox="0 0 140 72" fill="currentColor" aria-hidden="true">' +
+      '<rect x="17" y="27" width="9" height="18" rx="4"/>' +
+      '<rect x="28" y="20" width="13" height="32" rx="5"/>' +
+      '<rect x="43" y="14" width="12" height="44" rx="5"/>' +
+      '<rect x="55" y="31" width="30" height="10" rx="5"/>' +
+      '<rect x="85" y="14" width="12" height="44" rx="5"/>' +
+      '<rect x="99" y="20" width="13" height="32" rx="5"/>' +
+      '<rect x="114" y="27" width="9" height="18" rx="4"/>' +
+      '<g fill="#0b0c0f" opacity="0.28">' +
+        '<rect x="63" y="33" width="2" height="6" rx="1"/>' +
+        '<rect x="69" y="33" width="2" height="6" rx="1"/>' +
+        '<rect x="75" y="33" width="2" height="6" rx="1"/>' +
+      '</g>' +
+    '</svg>';
+  }
+
   /* ---------- 人体図SVG（自作・部位ハイライト） ---------- */
   function bodySvg(part) {
     var hl = {
@@ -323,7 +341,7 @@
     var entries = (w && w.entries) || [];
     if (!entries.length) {
       $('#entries').innerHTML =
-        '<div class="empty"><div class="ph-icon">🏋️</div><p>まだ記録がありません。<br>「＋ 種目を追加」からはじめましょう。</p></div>';
+        '<div class="empty"><div class="ph-icon">' + dumbbellSvg() + '</div><p>まだ記録がありません。<br>「＋ 種目を追加」からはじめましょう。</p></div>';
     } else {
       $('#entries').innerHTML = entries.map(entryHtml).join('');
     }
