@@ -1030,6 +1030,285 @@
     $('#calcTable').innerHTML = rows;
   }
 
+  /* ================== インターバルタイマー ================== */
+  var TW_ITEM_H = 44;     // ホイール各項目の高さ(px)。CSSと一致させること
+  var TW_MAX_MIN = 15;    // カスタムの最大（分）
+  var timer = {
+    total: 0, endAt: 0, remaining: 0,
+    running: false, paused: false, finished: false,
+    tick: null, wakeLock: null, audioCtx: null,
+    notifyAsked: false, customMin: 3,
+    twBuilt: false, twBound: false, twSel: -1
+  };
+
+  function fmtClock(sec) {
+    sec = Math.max(0, Math.ceil(sec));
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return ('0' + m).slice(-2) + ':' + ('0' + s).slice(-2);
+  }
+
+  /* ---- カスタム値の保存/復元 ---- */
+  function loadCustomMin() {
+    try {
+      var v = +localStorage.getItem('kintore_timer_min');
+      if (v >= 1 && v <= TW_MAX_MIN) timer.customMin = v;
+    } catch (e) { /* noop */ }
+  }
+  function saveCustomMin() {
+    try { localStorage.setItem('kintore_timer_min', String(timer.customMin)); } catch (e) { /* noop */ }
+  }
+
+  /* ---- カスタムホイール ---- */
+  function buildTwList() {
+    if (timer.twBuilt) return;
+    var html = '';
+    for (var i = 1; i <= TW_MAX_MIN; i++) html += '<div class="tw-item num">' + i + '</div>';
+    $('#twList').innerHTML = html;
+    timer.twBuilt = true;
+  }
+  function twSetSel(index) {
+    if (index === timer.twSel) return;
+    var kids = $('#twList').children;
+    if (timer.twSel >= 0 && kids[timer.twSel]) kids[timer.twSel].classList.remove('sel');
+    if (kids[index]) kids[index].classList.add('sel');
+    timer.twSel = index;
+    timer.customMin = index + 1;
+  }
+  function twIndexFromScroll() {
+    var sc = $('#twScroll');
+    var idx = Math.round(sc.scrollTop / TW_ITEM_H);
+    return Math.max(0, Math.min(TW_MAX_MIN - 1, idx));
+  }
+
+  /* ---- 音（Web Audio。タップ時にアンロックし、終了時にビープ） ---- */
+  function unlockAudio() {
+    try {
+      if (!timer.audioCtx) {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) timer.audioCtx = new AC();
+      }
+      if (timer.audioCtx && timer.audioCtx.state === 'suspended') timer.audioCtx.resume();
+    } catch (e) { /* noop */ }
+  }
+  function playBeep() {
+    try {
+      var ctx = timer.audioCtx;
+      if (!ctx) return;
+      if (ctx.state === 'suspended') ctx.resume();
+      var t0 = ctx.currentTime;
+      [0, 0.32, 0.64].forEach(function (off) {
+        var o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.value = 880;
+        g.gain.setValueAtTime(0.0001, t0 + off);
+        g.gain.exponentialRampToValueAtTime(0.4, t0 + off + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.26);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(t0 + off); o.stop(t0 + off + 0.28);
+      });
+    } catch (e) { /* noop */ }
+  }
+
+  /* ---- OS通知（許可時のみ）・バッジ ---- */
+  function askNotify() {
+    if (timer.notifyAsked) return;
+    timer.notifyAsked = true;
+    try {
+      if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+    } catch (e) { /* noop */ }
+  }
+  function showTimerNotification() {
+    try {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      var opts = { body: '休憩終了！ 次のセットへ', tag: 'kintore-timer', renotify: true, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png' };
+      if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+        navigator.serviceWorker.ready.then(function (reg) { reg.showNotification('筋トレ記録', opts); }).catch(function () {});
+      } else {
+        new Notification('筋トレ記録', opts);
+      }
+    } catch (e) { /* noop */ }
+  }
+  function setBadge() { try { if (navigator.setAppBadge) navigator.setAppBadge(1); } catch (e) { /* noop */ } }
+  function clearBadge() { try { if (navigator.clearAppBadge) navigator.clearAppBadge(); } catch (e) { /* noop */ } }
+
+  /* ---- 画面スリープ抑止（Wake Lock） ---- */
+  function requestWakeLock() {
+    try {
+      if (!('wakeLock' in navigator)) return;
+      navigator.wakeLock.request('screen').then(function (wl) { timer.wakeLock = wl; }).catch(function () {});
+    } catch (e) { /* noop */ }
+  }
+  function releaseWakeLock() {
+    try { if (timer.wakeLock) { timer.wakeLock.release(); timer.wakeLock = null; } } catch (e) { /* noop */ }
+  }
+
+  /* ---- カウントダウン本体（終了時刻の実時刻ベース＝復帰時に自己補正） ---- */
+  function startTick() { stopTick(); timer.tick = setInterval(tickTimer, 200); }
+  function stopTick() { if (timer.tick) { clearInterval(timer.tick); timer.tick = null; } }
+  function tickTimer() {
+    if (!timer.running || timer.paused) return;
+    timer.remaining = (timer.endAt - Date.now()) / 1000;
+    if (timer.remaining <= 0) { timer.remaining = 0; finishTimer(); return; }
+    renderTimer();
+  }
+
+  function startTimer(seconds) {
+    unlockAudio();
+    askNotify();
+    clearBadge();
+    timer.total = seconds;
+    timer.endAt = Date.now() + seconds * 1000;
+    timer.remaining = seconds;
+    timer.running = true;
+    timer.paused = false;
+    timer.finished = false;
+    requestWakeLock();
+    startTick();
+    setTimerView('running');
+    renderTimer();
+  }
+  function finishTimer() {
+    stopTick();
+    timer.running = false;
+    timer.paused = false;
+    timer.finished = true;
+    timer.remaining = 0;
+    releaseWakeLock();
+    playBeep();
+    showTimerNotification();
+    setBadge();
+    setTimerView('finished');
+    renderTimer();
+  }
+  function pauseResumeTimer() {
+    if (timer.finished) return;
+    if (timer.paused) {
+      timer.endAt = Date.now() + timer.remaining * 1000;
+      timer.paused = false;
+      requestWakeLock();
+      startTick();
+    } else {
+      timer.remaining = (timer.endAt - Date.now()) / 1000;
+      timer.paused = true;
+      stopTick();
+      releaseWakeLock();
+    }
+    renderTimer();
+  }
+  function addTime(sec) {
+    if (timer.finished) return;
+    timer.total += sec;
+    if (timer.paused) timer.remaining += sec;
+    else { timer.endAt += sec * 1000; timer.remaining = (timer.endAt - Date.now()) / 1000; }
+    renderTimer();
+  }
+  function resetTimer() {
+    stopTick();
+    timer.running = false; timer.paused = false; timer.finished = false;
+    releaseWakeLock();
+    clearBadge();
+    setTimerView('setup');
+    renderTimer();
+    scrollTwToCustom();
+  }
+  function againTimer() { startTimer(timer.total); }
+
+  function setTimerView(state) {
+    var v = $('#view-timer');
+    v.classList.toggle('running', state !== 'setup');
+    v.classList.toggle('finished', state === 'finished');
+  }
+
+  function renderTimer() {
+    var rem = timer.finished ? 0 : Math.max(0, timer.remaining);
+    var timeEl = $('#trTime');
+    if (timeEl) timeEl.textContent = fmtClock(rem);
+
+    var ringEl = $('#trRing');
+    if (ringEl) {
+      var C = 2 * Math.PI * 110;
+      ringEl.style.strokeDasharray = C.toFixed(1);
+      var prog = timer.total > 0 ? Math.max(0, Math.min(1, rem / timer.total)) : 0;
+      ringEl.style.strokeDashoffset = (C * (1 - prog)).toFixed(1);
+    }
+    var labelEl = $('#trLabel');
+    if (labelEl) labelEl.textContent = timer.finished ? '終了！ お疲れさまでした' : (timer.paused ? '一時停止中' : '残り');
+
+    var pause = $('#trPause'), plus = $('#trPlus30'), again = $('#trAgain'), reset = $('#trReset');
+    if (pause) { pause.style.display = timer.finished ? 'none' : ''; pause.textContent = timer.paused ? '再開' : '一時停止'; }
+    if (plus) plus.style.display = timer.finished ? 'none' : '';
+    if (again) again.style.display = timer.finished ? '' : 'none';
+    if (reset) reset.textContent = timer.finished ? '閉じる' : 'リセット';
+  }
+
+  function scrollTwToCustom() {
+    var idx = timer.customMin - 1;
+    requestAnimationFrame(function () {
+      var sc = $('#twScroll');
+      if (!sc) return;
+      sc.scrollTop = idx * TW_ITEM_H;
+      twSetSel(idx);
+    });
+  }
+
+  function bindTimer() {
+    timer.twBound = true;
+    var sc = $('#twScroll');
+    var ticking = false;
+    sc.addEventListener('scroll', function () {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () { ticking = false; twSetSel(twIndexFromScroll()); });
+    });
+    // マウスの上下ドラッグ（タッチはネイティブスクロール＋スナップに任せる）
+    var drag = { active: false, startY: 0, startScroll: 0 };
+    sc.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'touch') return;
+      drag.active = true; drag.startY = e.clientY; drag.startScroll = sc.scrollTop;
+      sc.setPointerCapture(e.pointerId);
+    });
+    sc.addEventListener('pointermove', function (e) {
+      if (!drag.active) return;
+      sc.scrollTop = drag.startScroll - (e.clientY - drag.startY);
+    });
+    var endDrag = function () {
+      if (!drag.active) return;
+      drag.active = false;
+      var i = twIndexFromScroll();
+      sc.scrollTop = i * TW_ITEM_H;
+      twSetSel(i);
+    };
+    sc.addEventListener('pointerup', endDrag);
+    sc.addEventListener('pointercancel', endDrag);
+    sc.addEventListener('wheel', function (e) { if (e.deltaY === 0) return; e.preventDefault(); sc.scrollTop += e.deltaY; }, { passive: false });
+
+    $$('#timerSetup .preset-btn').forEach(function (b) {
+      b.addEventListener('click', function () { startTimer(+b.dataset.sec); });
+    });
+    $('#twStart').addEventListener('click', function () { saveCustomMin(); startTimer(timer.customMin * 60); });
+    $('#trPause').addEventListener('click', pauseResumeTimer);
+    $('#trPlus30').addEventListener('click', function () { addTime(30); });
+    $('#trAgain').addEventListener('click', againTimer);
+    $('#trReset').addEventListener('click', resetTimer);
+
+    // バックグラウンド復帰時：経過を反映し、必要ならWake Lockを取り直す
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState !== 'visible') return;
+      if (timer.running && !timer.paused && !timer.finished) {
+        timer.remaining = (timer.endAt - Date.now()) / 1000;
+        if (timer.remaining <= 0) { finishTimer(); }
+        else { requestWakeLock(); if (!timer.tick) startTick(); renderTimer(); }
+      }
+    });
+  }
+
+  function timerInit() {
+    buildTwList();
+    if (!timer.twBound) { loadCustomMin(); bindTimer(); }
+    if (!timer.running && !timer.finished) { setTimerView('setup'); scrollTwToCustom(); }
+    renderTimer();
+  }
+
   /* ================== タブ切り替え・初期化 ================== */
   function switchTab(tab) {
     ui.tab = tab;
@@ -1037,6 +1316,7 @@
     $$('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + tab); });
     if (tab === 'log') renderLog(true);
     else if (tab === 'history') renderHistory();
+    else if (tab === 'timer') timerInit();
     else if (tab === 'calc') calcInit();
     else if (tab === 'settings') renderSettings();
     window.scrollTo(0, 0);

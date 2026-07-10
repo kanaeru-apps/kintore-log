@@ -60,10 +60,44 @@
     <!-- ============ タイマー ============ -->
     <section id="view-timer" class="view">
       <header class="page-header"><p class="eyebrow">INTERVAL</p><h2>タイマー</h2></header>
-      <div class="placeholder">
-        <div class="ph-icon">⏱️</div>
-        <h3>Phase 2 で実装予定</h3>
-        <p>セット間のインターバルタイマーが<br>ここに表示されます。</p>
+
+      <!-- セットアップ（プリセット＋カスタム） -->
+      <div id="timerSetup">
+        <div class="timer-presets">
+          <button class="preset-btn" data-sec="60"><b class="num">1</b><span>分</span></button>
+          <button class="preset-btn" data-sec="180"><b class="num">3</b><span>分</span></button>
+          <button class="preset-btn" data-sec="300"><b class="num">5</b><span>分</span></button>
+        </div>
+
+        <div class="timer-custom">
+          <p class="tc-title">カスタム（上下にスクロール）</p>
+          <div class="tw-wrap">
+            <div class="tw-highlight"></div>
+            <span class="tw-unit">分</span>
+            <div class="tw-scroll" id="twScroll"><div class="tw-list" id="twList"></div></div>
+          </div>
+          <button class="btn primary" id="twStart">この時間でスタート</button>
+        </div>
+
+        <p class="timer-note">終了時に音・通知・アプリバッジでお知らせします。作動中は画面が消えないようにします（iPhoneはアプリを開いている間に有効）。</p>
+      </div>
+
+      <!-- 実行中／終了 -->
+      <div class="timer-run">
+        <div class="tr-ring">
+          <svg viewBox="0 0 240 240" aria-hidden="true">
+            <circle class="ring-bg" cx="120" cy="120" r="110"></circle>
+            <circle class="ring-fg" id="trRing" cx="120" cy="120" r="110"></circle>
+          </svg>
+          <div class="tr-time num" id="trTime">00:00</div>
+          <div class="tr-label" id="trLabel">残り</div>
+        </div>
+        <div class="tr-controls">
+          <button class="btn ghost" id="trPause">一時停止</button>
+          <button class="btn ghost" id="trPlus30">＋30秒</button>
+          <button class="btn ghost" id="trAgain" style="display:none">もう一度</button>
+          <button class="btn ghost" id="trReset">リセット</button>
+        </div>
       </div>
     </section>
 
@@ -135,7 +169,7 @@
         </div>
       </div>
 
-      <p class="version">筋トレ記録 v0.1.9 — Phase 1</p>
+      <p class="version">筋トレ記録 v0.2.0 — Phase 2</p>
     </section>
 
   </main>
