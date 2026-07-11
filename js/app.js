@@ -840,8 +840,10 @@
     });
     var equipOrder = DB.EQUIPS.concat(['']);
     $('#exList').innerHTML = DB.PARTS.filter(function (p) { return byPart[p] && byPart[p].length; }).map(function (p) {
-      // 部位内は器具順に並べる
+      // 部位内は種目名のあいうえお順（同名なら器具順）に並べる → 同名種目が離れずまとまる
       var sorted = byPart[p].slice().sort(function (a, b) {
+        var byName = a.name.localeCompare(b.name, 'ja');
+        if (byName !== 0) return byName;
         return equipOrder.indexOf(a.equip || '') - equipOrder.indexOf(b.equip || '');
       });
       var open = !!ui.exExpanded[p];
