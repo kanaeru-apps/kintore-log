@@ -94,6 +94,8 @@ button { cursor: pointer; }
 
 .page-header { padding: calc(18px + env(safe-area-inset-top)) 0 6px; }
 .page-header h2 { font-size: 22px; font-weight: 800; margin-top: 2px; }
+/* ページ途中に置く見出し（グラフタブ内、カレンダーの下など）はセーフエリア分の余白は不要 */
+.page-header.chart-section-header { padding: 10px 0 6px; }
 
 .date-nav {
   display: flex;
