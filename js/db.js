@@ -11,8 +11,8 @@ var DB = (function () {
   var PARTS = ['胸', '背中', '脚', '肩', '腕', '腹', '有酸素', 'その他'];
   var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重'];
   var CARDIO_PART = '有酸素';
-  /* 有酸素セットのフィールド：時間(t/分)・距離(d/km)・速度(sp/km/h)・傾斜(inc/%)・カロリー(cal/kcal)・心拍(hr/bpm) */
-  var CARDIO_KEYS = ['t', 'd', 'sp', 'inc', 'cal', 'hr'];
+  /* 有酸素セットのフィールド：時間(t/分)・秒(ts/0-59)・距離(d/km)・速度(sp/km/h)・傾斜(inc/%)・カロリー(cal/kcal)・心拍(hr/bpm) */
+  var CARDIO_KEYS = ['t', 'ts', 'd', 'sp', 'inc', 'cal', 'hr'];
   var DEFAULTS = [
     ['ベンチプレス', '胸', 'バーベル'], ['ダンベルプレス', '胸', 'ダンベル'], ['インクラインベンチプレス', '胸', 'バーベル'], ['ダンベルフライ', '胸', 'ダンベル'], ['チェストプレス', '胸', 'マシン'],
     ['デッドリフト', '背中', 'バーベル'], ['ラットプルダウン', '背中', 'マシン'], ['ベントオーバーロー', '背中', 'バーベル'], ['シーテッドロー', '背中', 'ケーブル'], ['懸垂', '背中', '自重'],
@@ -31,23 +31,25 @@ var DB = (function () {
 
   function isCardioPart(part) { return part === CARDIO_PART; }
   function cp(v) { return v == null ? '' : v; }
-  /* 部位に応じた空セット（有酸素は6項目、それ以外は重量×回数） */
+  /* 部位に応じた空セット（有酸素は7項目、それ以外は重量×回数）
+     筋トレの重量は新規セット時に50kgをデフォルトにする。回数は常に0スタート（前回の回数を引き継がない） */
   function emptySet(part) {
     if (isCardioPart(part)) {
       var s = {};
       CARDIO_KEYS.forEach(function (k) { s[k] = ''; });
       return s;
     }
-    return { w: '', r: '' };
+    return { w: 50, r: 0 };
   }
-  /* 前回値の引き継ぎ・セット追加時に既存セットを複製する（部位で形が異なる） */
+  /* 前回値の引き継ぎ・セット追加時に既存セットを複製する（部位で形が異なる）
+     筋トレは重量のみ引き継ぎ、回数は毎回0から（前回の回数を誤って使い回さないため） */
   function copySet(part, s) {
     if (isCardioPart(part)) {
       var out = {};
       CARDIO_KEYS.forEach(function (k) { out[k] = cp(s[k]); });
       return out;
     }
-    return { w: cp(s.w), r: cp(s.r) };
+    return { w: cp(s.w), r: 0 };
   }
 
   function save() {

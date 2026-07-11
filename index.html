@@ -195,7 +195,7 @@
         </div>
       </div>
 
-      <p class="version">筋トレ記録 v0.3.0 — Phase 3</p>
+      <p class="version">筋トレ記録 v0.3.1 — Phase 3</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -303,6 +303,46 @@
       <div class="drum-highlight"></div>
       <span class="drum-unit">kg</span>
       <div class="drum-scroll" id="drumScroll"><div class="drum-list" id="drumList"></div></div>
+    </div>
+    <div class="drum-direct">
+      <label for="drumDirectInput">数字で直接入力</label>
+      <div class="drum-direct-row">
+        <input type="number" id="drumDirectInput" inputmode="decimal" step="0.5" min="0" max="300" placeholder="例: 62.5">
+        <span class="drum-direct-unit">kg</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 有酸素：時間（時・分・秒）ピッカー -->
+  <div id="ctimeBackdrop"></div>
+  <div id="ctimeSheet" role="dialog" aria-label="時間を選択">
+    <div class="drum-head">
+      <button id="ctimeCancel" class="drum-cancel">キャンセル</button>
+      <span id="ctimeTitle" class="drum-title"></span>
+      <button id="ctimeDone" class="drum-done">完了</button>
+    </div>
+    <div class="ctime-wrap">
+      <div class="ctime-highlight"></div>
+      <div class="ctime-col">
+        <div class="drum-scroll" id="ctimeHScroll"><div class="drum-list" id="ctimeHList"></div></div>
+      </div>
+      <span class="ctime-colon">時間</span>
+      <div class="ctime-col">
+        <div class="drum-scroll" id="ctimeMScroll"><div class="drum-list" id="ctimeMList"></div></div>
+      </div>
+      <span class="ctime-colon">分</span>
+      <div class="ctime-col">
+        <div class="drum-scroll" id="ctimeSScroll"><div class="drum-list" id="ctimeSList"></div></div>
+      </div>
+      <span class="ctime-colon">秒</span>
+    </div>
+    <div class="drum-direct">
+      <label>数字で直接入力</label>
+      <div class="ctime-direct-row">
+        <input type="number" id="ctimeHInput" inputmode="numeric" min="0" max="5" placeholder="0"><span>時間</span>
+        <input type="number" id="ctimeMInput" inputmode="numeric" min="0" max="59" placeholder="0"><span>分</span>
+        <input type="number" id="ctimeSInput" inputmode="numeric" min="0" max="59" placeholder="0"><span>秒</span>
+      </div>
     </div>
   </div>
 

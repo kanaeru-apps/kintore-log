@@ -1090,6 +1090,35 @@ input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
 }
 #drumSheet.show { transform: translate(-50%, 0); }
 
+/* 有酸素：時間（時/分/秒）ピッカーのシート自体（重量ドラムと同じ表示方式） */
+#ctimeBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  z-index: 58;
+}
+#ctimeBackdrop.show { opacity: 1; pointer-events: auto; }
+
+#ctimeSheet {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translate(-50%, 105%);
+  width: 100%;
+  max-width: 480px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 22px 22px 0 0;
+  z-index: 59;
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+}
+#ctimeSheet.show { transform: translate(-50%, 0); }
+
 .drum-head {
   display: flex;
   align-items: center;
@@ -1175,6 +1204,110 @@ input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
   -webkit-user-select: none;
 }
 .drum-item.sel { color: var(--volt); font-size: 28px; }
+
+/* ドラム系ピッカー共通：数字で直接入力する行 */
+.drum-direct { padding: 0 20px 4px; }
+.drum-direct label { display: block; font-size: 11px; color: var(--dim); margin-bottom: 6px; }
+.drum-direct-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 9px 12px;
+}
+.drum-direct-row input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-num);
+  font-size: 18px;
+  color: var(--text);
+  background: transparent;
+}
+.drum-direct-row input:focus { outline: none; color: var(--volt); }
+.drum-direct-unit { font-size: 13px; color: var(--dim); }
+
+/* 有酸素：時間（時/分/秒）ホイールピッカー */
+.ctime-wrap {
+  position: relative;
+  height: 220px;
+  margin: 4px 0 10px;
+  overflow: hidden;
+  display: flex;
+  align-items: stretch;
+  padding: 0 12px;
+}
+.ctime-col { flex: 1; min-width: 0; position: relative; }
+.ctime-colon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 88px;
+  height: 44px;
+  margin-top: 88px;
+  font-size: 12px;
+  color: var(--dim);
+  align-self: flex-start;
+}
+.ctime-highlight {
+  position: absolute;
+  top: 88px;
+  left: 8px;
+  right: 8px;
+  height: 44px;
+  border-top: 1px solid rgba(215, 255, 62, 0.5);
+  border-bottom: 1px solid rgba(215, 255, 62, 0.5);
+  background: rgba(215, 255, 62, 0.06);
+  border-radius: 10px;
+  pointer-events: none;
+  z-index: 2;
+}
+.ctime-wrap::before, .ctime-wrap::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 74px;
+  z-index: 1;
+  pointer-events: none;
+}
+.ctime-wrap::before { top: 0; background: linear-gradient(var(--panel), transparent); }
+.ctime-wrap::after { bottom: 0; background: linear-gradient(transparent, var(--panel)); }
+
+.ctime-direct-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 9px 10px;
+}
+.ctime-direct-row input {
+  width: 0;
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-family: var(--font-num);
+  font-size: 17px;
+  color: var(--text);
+  background: transparent;
+}
+.ctime-direct-row input:focus { outline: none; color: var(--volt); }
+.ctime-direct-row span { font-size: 11.5px; color: var(--dim); flex-shrink: 0; }
+
+/* 有酸素グリッド内の時間セル（重量ドラムと同じボタン方式） */
+.cf-time-btn {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-family: var(--font-num);
+  font-size: 18px;
+  color: var(--text);
+  background: transparent;
+}
+.cf-time-btn.empty { color: #4a505a; font-size: 13px; text-align: left; }
 
 /* ---------------- インターバルタイマー ---------------- */
 .timer-presets {

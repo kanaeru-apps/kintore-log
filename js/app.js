@@ -10,16 +10,26 @@
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
   var PART_CLASS = { '胸': 'chest', '背中': 'back', '脚': 'leg', '肩': 'shoulder', '腕': 'arm', '腹': 'core', '有酸素': 'cardio', 'その他': 'etc' };
   var CARDIO_PART = '有酸素';
-  /* 有酸素カードで表示する記録項目（キーはdb.jsのCARDIO_KEYSと一致させる） */
+  /* 有酸素カードで表示する記録項目（時間は時/分/秒ホイールの専用ボタンで別扱い） */
   var CARDIO_FIELDS = [
-    { k: 't', label: '時間', unit: '分', step: '1' },
     { k: 'd', label: '距離', unit: 'km', step: '0.1' },
     { k: 'sp', label: '速度', unit: 'km/h', step: '0.1' },
     { k: 'inc', label: '傾斜', unit: '%', step: '1' },
     { k: 'cal', label: 'カロリー', unit: 'kcal', step: '1' },
     { k: 'hr', label: '心拍', unit: 'bpm', step: '1' }
   ];
+  /* 実施セット判定・CSV用の全キー（時間は t=分・ts=秒 の2フィールド） */
+  var CARDIO_KEYS_ALL = ['t', 'ts'].concat(CARDIO_FIELDS.map(function (f) { return f.k; }));
   function isCardio(e) { return e && e.part === CARDIO_PART; }
+  /* 時間(分)+秒 を「1時間05分30秒」のように整形。未入力ならnull */
+  function fmtCardioTime(s) {
+    if (s.t === '' && s.ts === '') return null;
+    var t = +s.t || 0, ts = +s.ts || 0;
+    var h = Math.floor(t / 60), m = t % 60;
+    var mm = h > 0 ? ('0' + m).slice(-2) : String(m);
+    var ss = ('0' + ts).slice(-2);
+    return (h > 0 ? h + '時間' : '') + mm + '分' + ss + '秒';
+  }
 
   var ui = { tab: 'log', date: DB.todayStr(), pickerPart: '胸', expanded: {}, sheetEdit: false, exExpanded: {} };
 
@@ -48,11 +58,11 @@
   function workoutVol(w) {
     return (w.entries || []).reduce(function (a, e) { return a + setVol(e.sets); }, 0);
   }
-  /* 何か1項目でも入力されたセットだけを「実施セット」として数える（有酸素は6項目のいずれか） */
+  /* 何か1項目でも入力されたセットだけを「実施セット」として数える（有酸素は7項目のいずれか） */
   function filledSets(e) {
     if (isCardio(e)) {
       return e.sets.filter(function (s) {
-        return CARDIO_FIELDS.some(function (f) { return (+s[f.k] || 0) > 0; });
+        return CARDIO_KEYS_ALL.some(function (k) { return (+s[k] || 0) > 0; });
       });
     }
     return e.sets.filter(function (s) { return (+s.w || 0) > 0 || (+s.r || 0) > 0; });
@@ -251,6 +261,9 @@
     if (drumSelIndex >= 0 && kids[drumSelIndex]) kids[drumSelIndex].classList.remove('sel');
     if (kids[index]) kids[index].classList.add('sel');
     drumSelIndex = index;
+    // 直接入力欄にも反映（入力中（フォーカス中）は上書きしない）
+    var input = $('#drumDirectInput');
+    if (input && document.activeElement !== input) input.value = drumFmt(index * DRUM_STEP);
   }
 
   function drumIndexFromScroll() {
@@ -264,7 +277,7 @@
     drumTarget = { entryId: entryId, idx: idx };
 
     var s = DB.getSet(ui.date, entryId, idx);
-    var cur = (s && s.w !== '' && s.w != null) ? +s.w : 20; // 空なら20kgから
+    var cur = (s && s.w !== '' && s.w != null) ? +s.w : 50; // 空なら50kgから
     cur = Math.max(0, Math.min(DRUM_MAX, cur));
     var index = Math.round(cur / DRUM_STEP);
 
@@ -274,6 +287,7 @@
 
     $('#drumBackdrop').classList.add('show');
     $('#drumSheet').classList.add('show');
+    $('#drumDirectInput').value = drumFmt(index * DRUM_STEP);
 
     drumSelIndex = -1;
     var scroll = $('#drumScroll');
@@ -329,6 +343,156 @@
     $('#drumDone').onclick = function () { closeDrum(true); };
     $('#drumCancel').onclick = function () { closeDrum(false); };
     $('#drumBackdrop').onclick = function () { closeDrum(false); };
+
+    // 数字の直接入力 → ホイールをその値へスクロールして同期させる
+    $('#drumDirectInput').addEventListener('input', function (e) {
+      var v = parseFloat(e.target.value);
+      if (isNaN(v)) return;
+      v = Math.max(0, Math.min(DRUM_MAX, v));
+      var index = Math.round(v / DRUM_STEP);
+      scroll.scrollTop = index * DRUM_ITEM_H;
+      setDrumSel(index);
+    });
+  }
+
+  /* ================== 有酸素：時間（時/分/秒）ピッカー ================== */
+  var CTIME_ITEM_H = 44;
+  var CTIME_H_MAX = 5;    // 0〜5時間
+  var CTIME_MS_MAX = 59;  // 分・秒は0〜59
+  var ctimeTarget = null; // { entryId, idx }
+  var ctimeSel = { h: -1, m: -1, s: -1 };
+  var ctimeBuilt = false;
+  var CTIME_LIST_ID = { h: '#ctimeHList', m: '#ctimeMList', s: '#ctimeSList' };
+  var CTIME_SCROLL_ID = { h: '#ctimeHScroll', m: '#ctimeMScroll', s: '#ctimeSScroll' };
+  var CTIME_INPUT_ID = { h: '#ctimeHInput', m: '#ctimeMInput', s: '#ctimeSInput' };
+
+  function ctimeBuildLists() {
+    if (ctimeBuilt) return;
+    var hHtml = '', mHtml = '', sHtml = '';
+    for (var h = 0; h <= CTIME_H_MAX; h++) hHtml += '<div class="drum-item num">' + h + '</div>';
+    for (var i = 0; i <= CTIME_MS_MAX; i++) {
+      var v = ('0' + i).slice(-2);
+      mHtml += '<div class="drum-item num">' + v + '</div>';
+      sHtml += '<div class="drum-item num">' + v + '</div>';
+    }
+    $('#ctimeHList').innerHTML = hHtml;
+    $('#ctimeMList').innerHTML = mHtml;
+    $('#ctimeSList').innerHTML = sHtml;
+    ctimeBuilt = true;
+  }
+
+  function ctimeSetSel(col, index) {
+    if (ctimeSel[col] === index) return;
+    var kids = $(CTIME_LIST_ID[col]).children;
+    if (ctimeSel[col] >= 0 && kids[ctimeSel[col]]) kids[ctimeSel[col]].classList.remove('sel');
+    if (kids[index]) kids[index].classList.add('sel');
+    ctimeSel[col] = index;
+    var input = $(CTIME_INPUT_ID[col]);
+    if (input && document.activeElement !== input) input.value = (col === 'h') ? String(index) : ('0' + index).slice(-2);
+  }
+
+  function ctimeIndexFromScroll(col, max) {
+    var scroll = $(CTIME_SCROLL_ID[col]);
+    var index = Math.round(scroll.scrollTop / CTIME_ITEM_H);
+    return Math.max(0, Math.min(max, index));
+  }
+
+  function openCtime(entryId, idx) {
+    ctimeBuildLists();
+    ctimeTarget = { entryId: entryId, idx: idx };
+
+    var s = DB.getSet(ui.date, entryId, idx);
+    var t = (s && s.t !== '' && s.t != null) ? +s.t : 0;
+    var ts = (s && s.ts !== '' && s.ts != null) ? +s.ts : 0;
+    var h = Math.max(0, Math.min(CTIME_H_MAX, Math.floor(t / 60)));
+    var m = Math.max(0, Math.min(CTIME_MS_MAX, t % 60));
+    var sec = Math.max(0, Math.min(CTIME_MS_MAX, ts));
+
+    var w = DB.getWorkout(ui.date);
+    var ent = ((w && w.entries) || []).filter(function (x) { return x.id === entryId; })[0];
+    $('#ctimeTitle').textContent = (ent ? ent.name : '') + '　' + (idx + 1) + 'セッション目';
+
+    $('#ctimeBackdrop').classList.add('show');
+    $('#ctimeSheet').classList.add('show');
+    $('#ctimeHInput').value = String(h);
+    $('#ctimeMInput').value = ('0' + m).slice(-2);
+    $('#ctimeSInput').value = ('0' + sec).slice(-2);
+
+    ctimeSel = { h: -1, m: -1, s: -1 };
+    requestAnimationFrame(function () {
+      $('#ctimeHScroll').scrollTop = h * CTIME_ITEM_H;
+      $('#ctimeMScroll').scrollTop = m * CTIME_ITEM_H;
+      $('#ctimeSScroll').scrollTop = sec * CTIME_ITEM_H;
+      ctimeSetSel('h', h);
+      ctimeSetSel('m', m);
+      ctimeSetSel('s', sec);
+    });
+  }
+
+  function closeCtime(commit) {
+    if (commit && ctimeTarget) {
+      var h = ctimeSel.h >= 0 ? ctimeSel.h : 0;
+      var m = ctimeSel.m >= 0 ? ctimeSel.m : 0;
+      var sec = ctimeSel.s >= 0 ? ctimeSel.s : 0;
+      DB.updateSet(ui.date, ctimeTarget.entryId, ctimeTarget.idx, 't', h * 60 + m);
+      DB.updateSet(ui.date, ctimeTarget.entryId, ctimeTarget.idx, 'ts', sec);
+    }
+    $('#ctimeBackdrop').classList.remove('show');
+    $('#ctimeSheet').classList.remove('show');
+    ctimeTarget = null;
+    if (commit) renderLog();
+  }
+
+  function bindCtimeCol(col, max) {
+    var scroll = $(CTIME_SCROLL_ID[col]);
+    var ticking = false;
+    scroll.addEventListener('scroll', function () {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () { ticking = false; ctimeSetSel(col, ctimeIndexFromScroll(col, max)); });
+    });
+    var drag = { active: false, startY: 0, startScroll: 0 };
+    scroll.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'touch') return;
+      drag.active = true; drag.startY = e.clientY; drag.startScroll = scroll.scrollTop;
+      scroll.setPointerCapture(e.pointerId);
+    });
+    scroll.addEventListener('pointermove', function (e) {
+      if (!drag.active) return;
+      scroll.scrollTop = drag.startScroll - (e.clientY - drag.startY);
+    });
+    var endDrag = function () {
+      if (!drag.active) return;
+      drag.active = false;
+      var index = ctimeIndexFromScroll(col, max);
+      scroll.scrollTop = index * CTIME_ITEM_H;
+      ctimeSetSel(col, index);
+    };
+    scroll.addEventListener('pointerup', endDrag);
+    scroll.addEventListener('pointercancel', endDrag);
+  }
+
+  function bindCtime() {
+    bindCtimeCol('h', CTIME_H_MAX);
+    bindCtimeCol('m', CTIME_MS_MAX);
+    bindCtimeCol('s', CTIME_MS_MAX);
+
+    $('#ctimeDone').onclick = function () { closeCtime(true); };
+    $('#ctimeCancel').onclick = function () { closeCtime(false); };
+    $('#ctimeBackdrop').onclick = function () { closeCtime(false); };
+
+    function bindDirectInput(col, max) {
+      $(CTIME_INPUT_ID[col]).addEventListener('input', function (e) {
+        var v = parseInt(e.target.value, 10);
+        if (isNaN(v)) return;
+        v = Math.max(0, Math.min(max, v));
+        $(CTIME_SCROLL_ID[col]).scrollTop = v * CTIME_ITEM_H;
+        ctimeSetSel(col, v);
+      });
+    }
+    bindDirectInput('h', CTIME_H_MAX);
+    bindDirectInput('m', CTIME_MS_MAX);
+    bindDirectInput('s', CTIME_MS_MAX);
   }
 
   /* ================== 記録タブ ================== */
@@ -438,7 +602,14 @@
   /* 有酸素種目：時間・距離・速度・傾斜・カロリー・心拍 */
   function cardioEntryHtml(e, i) {
     var rows = e.sets.map(function (s, idx) {
-      var cells = CARDIO_FIELDS.map(function (f) {
+      var timeVal = fmtCardioTime(s);
+      var timeCell = '<label class="cf">' +
+        '<span class="cf-label">時間</span>' +
+        '<span class="cf-inputwrap">' +
+          '<button class="cf-time-btn num' + (timeVal ? '' : ' empty') + '" data-action="ctime-open" type="button">' + (timeVal || '分') + '</button>' +
+        '</span>' +
+      '</label>';
+      var cells = timeCell + CARDIO_FIELDS.map(function (f) {
         return '<label class="cf">' +
           '<span class="cf-label">' + f.label + '</span>' +
           '<span class="cf-inputwrap">' +
@@ -509,6 +680,8 @@
         if (enti) openExInfo(enti.exId, enti);
       } else if (a === 'w-drum') {
         openDrum(id, idx);
+      } else if (a === 'ctime-open') {
+        openCtime(id, idx);
       } else if (a === 'del-entry') {
         var w0 = DB.getWorkout(ui.date);
         var ent = ((w0 && w0.entries) || []).filter(function (x) { return x.id === id; })[0];
@@ -933,7 +1106,7 @@
     if (!dates.length) { toast('書き出す記録がありません'); return; }
     var head = ['日付', '曜日', '部位', '種目', '器具', 'セット',
       '重量kg', '回数', 'ボリュームkg',
-      '時間min', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ'];
+      '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ'];
     var lines = [head.join(',')];
     var csv = function (v) {
       v = String(v == null ? '' : v);
@@ -952,6 +1125,7 @@
             cardio ? '' : val(s.r),
             cardio ? '' : (+s.w || 0) * (+s.r || 0),
             cardio ? val(s.t) : '',
+            cardio ? val(s.ts) : '',
             cardio ? val(s.d) : '',
             cardio ? val(s.sp) : '',
             cardio ? val(s.inc) : '',
@@ -1514,6 +1688,7 @@
   bindSettings();
   bindExInfo();
   bindDrum();
+  bindCtime();
   loadTimerSettings();
   bindTimerSettingsOnce();
   renderLog(true);
