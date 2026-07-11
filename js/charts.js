@@ -15,7 +15,7 @@ var Charts = (function () {
     '腕': '#62e3cb', '腹': '#ff9ec4', 'その他': '#9ba0a8'
   };
 
-  var state = { cardTab: 'exercise', exId: null, bound: false };
+  var state = { cardTab: 'exercise', part: null, exId: null, bound: false };
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -65,6 +65,15 @@ var Charts = (function () {
   }
 
   /* ================== 部位別ボリューム：期間バケット ================== */
+  function dayBuckets(count) {
+    var today = parseDate(DB.todayStr());
+    var buckets = [];
+    for (var i = count - 1; i >= 0; i--) {
+      var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+      buckets.push({ label: (d.getMonth() + 1) + '/' + d.getDate(), dateStr: toStr(d) });
+    }
+    return buckets;
+  }
   function mondayOf(d) {
     var day = d.getDay();
     var diff = (day === 0 ? -6 : 1 - day);
@@ -92,7 +101,7 @@ var Charts = (function () {
   }
 
   function volumeByPartBuckets(range) {
-    var buckets = range === 'month' ? monthBuckets(6) : weekBuckets(8);
+    var buckets = range === 'month' ? monthBuckets(6) : range === 'day' ? dayBuckets(8) : weekBuckets(8);
     var sums = buckets.map(function () { return {}; });
 
     DB.datesWithData().forEach(function (date) {
@@ -100,6 +109,8 @@ var Charts = (function () {
       var idx = -1;
       if (range === 'month') {
         idx = buckets.findIndex(function (b) { return b.year === d.getFullYear() && b.month === d.getMonth(); });
+      } else if (range === 'day') {
+        idx = buckets.findIndex(function (b) { return b.dateStr === date; });
       } else {
         idx = buckets.findIndex(function (b) { return d >= b.start && d <= b.end; });
       }
@@ -267,26 +278,36 @@ var Charts = (function () {
     return chartCard(title, svg + legend);
   }
 
-  /* 週次グラフの下に月次グラフを並べて表示 */
+  /* 日次グラフ・週次グラフ・月次グラフの順に並べて表示 */
   function renderVolumePane() {
     $('#chartVolBody').innerHTML =
+      volumeCard('day', '部位別ボリューム（日次・直近8日間）') +
       volumeCard('week', '部位別ボリューム（週次・直近8週間）') +
       volumeCard('month', '部位別ボリューム（月次・直近6ヶ月）');
   }
 
-  function populateExSelect() {
-    var sel = $('#chartExSelect');
+  /* まず部位を選ぶチップを描画（種目が登録されている部位のみ） */
+  function populatePartChips() {
     var byPart = {};
     DB.getExercises().forEach(function (x) { (byPart[x.part] = byPart[x.part] || []).push(x); });
-    sel.innerHTML = DB.PARTS.filter(function (p) { return byPart[p] && byPart[p].length; }).map(function (p) {
-      var opts = byPart[p].map(function (x) {
-        return '<option value="' + x.id + '">' + esc(x.name) + (x.equip ? '（' + esc(x.equip) + '）' : '') + '</option>';
-      }).join('');
-      return '<optgroup label="' + esc(p) + '">' + opts + '</optgroup>';
+    var parts = DB.PARTS.filter(function (p) { return byPart[p] && byPart[p].length; });
+    if (!state.part || parts.indexOf(state.part) < 0) state.part = parts[0] || null;
+    $('#chartPartChips').innerHTML = parts.map(function (p) {
+      return '<button class="chart-pchip' + (p === state.part ? ' active' : '') + '" data-part="' + esc(p) + '" type="button">' + esc(p) + '</button>';
     }).join('');
-    if (state.exId) sel.value = state.exId;
-    // 種目削除などでvalueが反映されなければ、実際に選ばれている種目に同期する
-    state.exId = sel.value || null;
+  }
+  /* 選んだ部位の種目だけを一覧表示（スクロールが長くならないように絞り込む） */
+  function populateExList() {
+    var list = state.part ? DB.getExercises().filter(function (x) { return x.part === state.part; }) : [];
+    if (!state.exId || list.every(function (x) { return x.id !== state.exId; })) {
+      state.exId = list.length ? list[0].id : null;
+    }
+    $('#chartExList').innerHTML = list.map(function (x) {
+      return '<button class="chart-ex-item' + (x.id === state.exId ? ' active' : '') + '" data-ex="' + x.id + '" type="button">' +
+        '<span>' + esc(x.name) + (x.equip ? '（' + esc(x.equip) + '）' : '') + '</span>' +
+        '<span class="chart-ex-check">✓</span>' +
+      '</button>';
+    }).join('');
   }
 
   function switchCTab(tab) {
@@ -303,8 +324,19 @@ var Charts = (function () {
     $$('.chart-tab').forEach(function (b) {
       b.addEventListener('click', function () { switchCTab(b.dataset.ctab); });
     });
-    $('#chartExSelect').addEventListener('change', function (e) {
-      state.exId = e.target.value;
+    $('#chartPartChips').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-part]');
+      if (!b) return;
+      state.part = b.dataset.part;
+      populatePartChips();
+      populateExList();
+      renderExercisePane();
+    });
+    $('#chartExList').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-ex]');
+      if (!b) return;
+      state.exId = b.dataset.ex;
+      populateExList();
       renderExercisePane();
     });
   }
@@ -329,7 +361,8 @@ var Charts = (function () {
 
   function init() {
     bindOnce();
-    populateExSelect();
+    populatePartChips();
+    populateExList();
     renderTotalVol();
     if (state.cardTab === 'exercise') renderExercisePane(); else renderVolumePane();
   }

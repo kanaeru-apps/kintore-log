@@ -614,15 +614,47 @@ input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
 .total-vol-value { font-size: 40px; color: var(--volt); line-height: 1; }
 .total-vol-value small { font-size: 14px; color: var(--dim); font-family: var(--font-body); margin-left: 2px; }
 
-.chart-select {
+/* 種目別グラフ：まず部位を選ぶチップ */
+.chart-part-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  margin-bottom: 10px;
+  scrollbar-width: none;
+}
+.chart-part-chips::-webkit-scrollbar { display: none; }
+.chart-pchip {
+  flex-shrink: 0;
+  padding: 7px 15px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--dim);
+  font-size: 13px;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.chart-pchip.active { background: var(--volt); color: var(--ink); border-color: var(--volt); }
+
+/* 選んだ部位の種目一覧（スクロールが長くならないよう部位ごとに絞り込む） */
+.chart-ex-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.chart-ex-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   width: 100%;
+  text-align: left;
+  padding: 12px 14px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 11px 12px;
   font-size: 14px;
-  margin-bottom: 12px;
+  color: var(--text);
 }
+.chart-ex-item.active { border-color: var(--volt); background: rgba(215, 255, 62, 0.06); color: var(--volt); }
+.chart-ex-check { color: transparent; font-weight: 700; margin-left: 8px; }
+.chart-ex-item.active .chart-ex-check { color: var(--volt); }
 
 .chart-card {
   background: var(--panel);
