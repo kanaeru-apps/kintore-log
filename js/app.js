@@ -21,7 +21,7 @@
   ];
   function isCardio(e) { return e && e.part === CARDIO_PART; }
 
-  var ui = { tab: 'log', date: DB.todayStr(), pickerPart: '胸', expanded: {}, sheetEdit: false };
+  var ui = { tab: 'log', date: DB.todayStr(), pickerPart: '胸', expanded: {}, sheetEdit: false, exExpanded: {} };
 
   /* ---------- ユーティリティ ---------- */
   function esc(s) {
@@ -840,15 +840,19 @@
       var sorted = byPart[p].slice().sort(function (a, b) {
         return equipOrder.indexOf(a.equip || '') - equipOrder.indexOf(b.equip || '');
       });
-      return '<h5 class="ex-part">' + esc(p) + '</h5><div class="panel-list">' +
-        sorted.map(function (x) {
-          return '<div class="s-row" data-ex="' + x.id + '">' +
-            '<div class="s-main" data-action="info-ex"><b>' + esc(x.name) + equipTag(x.equip) + '</b></div>' +
-            '<button class="link" data-action="rename">名称変更</button>' +
-            '<button class="link danger" data-action="del-ex">削除</button>' +
-          '</div>';
-        }).join('') +
-      '</div>';
+      var open = !!ui.exExpanded[p];
+      return '<button class="ex-part' + (open ? ' open' : '') + '" data-part="' + esc(p) + '" type="button">' +
+        '<span>' + esc(p) + '</span>' +
+        '<span class="ex-part-count">' + sorted.length + '件</span>' +
+        '<span class="ex-part-arrow">›</span>' +
+      '</button>' +
+      (open ? '<div class="panel-list">' + sorted.map(function (x) {
+        return '<div class="s-row" data-ex="' + x.id + '">' +
+          '<div class="s-main" data-action="info-ex"><b>' + esc(x.name) + equipTag(x.equip) + '</b></div>' +
+          '<button class="link" data-action="rename">名称変更</button>' +
+          '<button class="link danger" data-action="del-ex">削除</button>' +
+        '</div>';
+      }).join('') + '</div>' : '');
     }).join('');
     $('#storageInfo').textContent = 'ブラウザ内に保存中 · 約 ' + DB.sizeKB() + ' KB';
   }
@@ -857,14 +861,25 @@
     $('#addExBtn').onclick = function () {
       var name = $('#newExName').value.trim();
       if (!name) { toast('種目名を入力してください'); return; }
-      DB.addExercise(name, $('#newExPart').value, $('#newExEquip').value);
+      var part = $('#newExPart').value;
+      DB.addExercise(name, part, $('#newExEquip').value);
       $('#newExName').value = '';
       $('#newExEquip').value = '';
+      // 追加した部位だけを開いた状態にする（他は閉じる）
+      ui.exExpanded = {};
+      ui.exExpanded[part] = true;
       renderSettings();
       toast('種目を追加しました');
     };
 
     $('#exList').addEventListener('click', function (e) {
+      var partBtn = e.target.closest('.ex-part');
+      if (partBtn) {
+        var p = partBtn.dataset.part;
+        ui.exExpanded[p] = !ui.exExpanded[p];
+        renderSettings();
+        return;
+      }
       var btn = e.target.closest('[data-action]');
       if (!btn) return;
       var row = e.target.closest('[data-ex]');
@@ -894,6 +909,7 @@
       if (!confirm('本当に削除しますか？ この操作は取り消せません。')) return;
       DB.wipe();
       ui.expanded = {};
+      ui.exExpanded = {};
       renderLog();
       renderSettings();
       toast('データを初期化しました');
