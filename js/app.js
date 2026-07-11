@@ -1037,9 +1037,39 @@
     total: 0, endAt: 0, remaining: 0,
     running: false, paused: false, finished: false,
     tick: null, wakeLock: null, audioCtx: null, beepNodes: [],
-    notifyAsked: false, customMin: 3,
+    customMin: 3,
     twBuilt: false, twBound: false, twSel: -1
   };
+
+  var SOUND_PATTERNS = [
+    { key: 'beep', label: 'ビープ（現在の音）' },
+    { key: 'bell', label: 'ベル' },
+    { key: 'chime', label: 'チャイム' },
+    { key: 'digital', label: '電子音' },
+    { key: 'soft', label: 'ソフト' }
+  ];
+  var timerSettings = { sound: 'beep', soundOn: true, vibrateOn: true, notifyOn: true };
+
+  function loadTimerSettings() {
+    try {
+      var s = localStorage.getItem('kintore_timer_sound');
+      if (s && SOUND_PATTERNS.some(function (p) { return p.key === s; })) timerSettings.sound = s;
+      var on = localStorage.getItem('kintore_timer_sound_on');
+      if (on !== null) timerSettings.soundOn = on === '1';
+      var vib = localStorage.getItem('kintore_timer_vibrate_on');
+      if (vib !== null) timerSettings.vibrateOn = vib === '1';
+      var nt = localStorage.getItem('kintore_timer_notify_on');
+      if (nt !== null) timerSettings.notifyOn = nt === '1';
+    } catch (e) { /* noop */ }
+  }
+  function saveTimerSettings() {
+    try {
+      localStorage.setItem('kintore_timer_sound', timerSettings.sound);
+      localStorage.setItem('kintore_timer_sound_on', timerSettings.soundOn ? '1' : '0');
+      localStorage.setItem('kintore_timer_vibrate_on', timerSettings.vibrateOn ? '1' : '0');
+      localStorage.setItem('kintore_timer_notify_on', timerSettings.notifyOn ? '1' : '0');
+    } catch (e) { /* noop */ }
+  }
 
   function fmtClock(sec) {
     sec = Math.max(0, Math.ceil(sec));
@@ -1090,35 +1120,81 @@
       if (timer.audioCtx && timer.audioCtx.state === 'suspended') timer.audioCtx.resume();
     } catch (e) { /* noop */ }
   }
-  function playBeep() {
+  /* 1音分をスケジュール（音色・周波数・長さ・音量を指定） */
+  function scheduleTone(ctx, t0, freq, dur, type, peak) {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    var attack = Math.min(0.02, dur * 0.2);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(peak || 0.4, t0 + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(t0);
+    o.stop(t0 + dur + 0.05);
+    timer.beepNodes.push(o);
+  }
+  /* ベルの1打（基音＋倍音を重ねて金属的な減衰音にする） */
+  function scheduleBellStrike(ctx, t0) {
+    [[523.25, 0.5, 1.3], [1046.5, 0.28, 1.0], [1318.5, 0.18, 0.8]].forEach(function (p) {
+      scheduleTone(ctx, t0, p[0], p[2], 'sine', 0.5 * p[1]);
+    });
+  }
+  /* チャイムの3音（ドミソの上昇アルペジオ） */
+  function scheduleChimeTriplet(ctx, t0) {
+    [523.25, 659.25, 783.99].forEach(function (freq, i) {
+      scheduleTone(ctx, t0 + i * 0.28, freq, 0.6, 'triangle', 0.35);
+    });
+  }
+  /* 選んだ音のパターンをスケジュール（full=終了時の約5秒／false=設定画面での短いプレビュー） */
+  function schedulePattern(ctx, key, full) {
+    var t0 = ctx.currentTime, i;
+    if (key === 'bell') {
+      var bellReps = full ? 4 : 1;
+      for (i = 0; i < bellReps; i++) scheduleBellStrike(ctx, t0 + i * 1.4);
+    } else if (key === 'chime') {
+      var chimeReps = full ? 3 : 1;
+      for (i = 0; i < chimeReps; i++) scheduleChimeTriplet(ctx, t0 + i * 2.2);
+    } else if (key === 'digital') {
+      var digiCount = full ? 22 : 3;
+      for (i = 0; i < digiCount; i++) scheduleTone(ctx, t0 + i * 0.22, (i % 2 === 0) ? 1318.5 : 1046.5, 0.11, 'square', 0.22);
+    } else if (key === 'soft') {
+      var softCount = full ? 6 : 1;
+      for (i = 0; i < softCount; i++) scheduleTone(ctx, t0 + i * 0.9, (i % 2 === 0) ? 440 : 523.25, 0.7, 'triangle', 0.22);
+    } else {
+      var beepCount = full ? 11 : 2; // 約5秒間（0〜5.0秒に0.5秒間隔でビープ）
+      for (i = 0; i < beepCount; i++) scheduleTone(ctx, t0 + i * 0.5, (i % 2 === 0) ? 880 : 988, 0.32, 'sine', 0.4);
+    }
+  }
+  /* タイマー終了時のアラーム音（設定でオフなら鳴らさない） */
+  function playAlarmSound() {
+    if (!timerSettings.soundOn) return;
     try {
       var ctx = timer.audioCtx;
       if (!ctx) return;
       if (ctx.state === 'suspended') ctx.resume();
       stopBeep();
-      var t0 = ctx.currentTime;
-      var interval = 0.5, count = 11; // 約5秒間（0〜5.0秒に0.5秒間隔でビープ）
-      for (var i = 0; i < count; i++) {
-        var off = i * interval;
-        var o = ctx.createOscillator(), g = ctx.createGain();
-        o.type = 'sine';
-        o.frequency.value = (i % 2 === 0) ? 880 : 988;
-        g.gain.setValueAtTime(0.0001, t0 + off);
-        g.gain.exponentialRampToValueAtTime(0.4, t0 + off + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.32);
-        o.connect(g); g.connect(ctx.destination);
-        o.start(t0 + off);
-        o.stop(t0 + off + 0.34);
-        timer.beepNodes.push(o);
-      }
+      schedulePattern(ctx, timerSettings.sound, true);
+    } catch (e) { /* noop */ }
+  }
+  /* 設定画面での試聴（短いプレビュー） */
+  function previewSound(key) {
+    unlockAudio();
+    try {
+      var ctx = timer.audioCtx;
+      if (!ctx) return;
+      if (ctx.state === 'suspended') ctx.resume();
+      stopBeep();
+      schedulePattern(ctx, key, false);
     } catch (e) { /* noop */ }
   }
   function stopBeep() {
     (timer.beepNodes || []).forEach(function (o) { try { o.stop(); o.disconnect(); } catch (e) { /* noop */ } });
     timer.beepNodes = [];
   }
-  /* バイブ（対応端末のみ。iPhoneのSafari/PWAは非対応のため無効） */
+  /* バイブ（対応端末のみ。iPhoneのSafari/PWAは非対応のため無効。設定でオフなら振動しない） */
   function vibrateAlarm() {
+    if (!timerSettings.vibrateOn) return;
     try {
       if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400]);
     } catch (e) { /* noop */ }
@@ -1129,13 +1205,12 @@
 
   /* ---- OS通知（許可時のみ）・バッジ ---- */
   function askNotify() {
-    if (timer.notifyAsked) return;
-    timer.notifyAsked = true;
     try {
       if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
     } catch (e) { /* noop */ }
   }
   function showTimerNotification() {
+    if (!timerSettings.notifyOn) return;
     try {
       if (!('Notification' in window) || Notification.permission !== 'granted') return;
       var opts = { body: '休憩終了！ 次のセットへ', tag: 'kintore-timer', renotify: true, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png' };
@@ -1194,7 +1269,7 @@
     timer.finished = true;
     timer.remaining = 0;
     releaseWakeLock();
-    playBeep();
+    playAlarmSound();
     vibrateAlarm();
     showTimerNotification();
     setBadge();
@@ -1336,6 +1411,58 @@
     renderTimer();
   }
 
+  /* ================== 設定：タイマー（アラーム音・通知） ================== */
+  function openTimerSettings() {
+    $$('.view').forEach(function (v) { v.classList.remove('active'); });
+    $('#view-settings-timer').classList.add('active');
+    renderTimerSettings();
+    window.scrollTo(0, 0);
+  }
+  function closeTimerSettings() {
+    $$('.view').forEach(function (v) { v.classList.remove('active'); });
+    $('#view-settings').classList.add('active');
+    window.scrollTo(0, 0);
+  }
+  function renderTimerSettings() {
+    $('#soundList').innerHTML = SOUND_PATTERNS.map(function (p) {
+      return '<button class="sound-row' + (p.key === timerSettings.sound ? ' selected' : '') + '" data-sound="' + p.key + '" type="button">' +
+        '<span class="sound-name">' + esc(p.label) + '</span>' +
+        '<span class="sound-check">✓</span>' +
+      '</button>';
+    }).join('');
+    $('#toggleSoundOn').checked = timerSettings.soundOn;
+    $('#toggleVibrateOn').checked = timerSettings.vibrateOn;
+    $('#toggleNotifyOn').checked = timerSettings.notifyOn;
+  }
+  var timerSettingsBound = false;
+  function bindTimerSettingsOnce() {
+    if (timerSettingsBound) return;
+    timerSettingsBound = true;
+    $('#openTimerSettingsBtn').addEventListener('click', openTimerSettings);
+    $('#backFromTimerSettings').addEventListener('click', closeTimerSettings);
+    $('#soundList').addEventListener('click', function (e) {
+      var row = e.target.closest('[data-sound]');
+      if (!row) return;
+      timerSettings.sound = row.dataset.sound;
+      saveTimerSettings();
+      renderTimerSettings();
+      previewSound(timerSettings.sound);
+    });
+    $('#toggleSoundOn').addEventListener('change', function (e) {
+      timerSettings.soundOn = e.target.checked;
+      saveTimerSettings();
+    });
+    $('#toggleVibrateOn').addEventListener('change', function (e) {
+      timerSettings.vibrateOn = e.target.checked;
+      saveTimerSettings();
+    });
+    $('#toggleNotifyOn').addEventListener('change', function (e) {
+      timerSettings.notifyOn = e.target.checked;
+      saveTimerSettings();
+      if (timerSettings.notifyOn) askNotify();
+    });
+  }
+
   /* ================== タブ切り替え・初期化 ================== */
   function switchTab(tab) {
     ui.tab = tab;
@@ -1359,5 +1486,7 @@
   bindSettings();
   bindExInfo();
   bindDrum();
+  loadTimerSettings();
+  bindTimerSettingsOnce();
   renderLog(true);
 })();

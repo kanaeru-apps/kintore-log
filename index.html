@@ -145,6 +145,16 @@
       </div>
 
       <div class="s-section">
+        <h4 class="s-title">通知</h4>
+        <div class="panel-list">
+          <button class="s-row s-row-nav" id="openTimerSettingsBtn" type="button">
+            <div class="s-main"><b>タイマー</b><small>アラーム音・通知の設定</small></div>
+            <span class="s-nav-arrow">›</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="s-section">
         <h4 class="s-title">データ</h4>
         <div class="panel-list">
           <div class="s-row">
@@ -170,7 +180,39 @@
         </div>
       </div>
 
-      <p class="version">筋トレ記録 v0.2.4 — Phase 2</p>
+      <p class="version">筋トレ記録 v0.2.5 — Phase 2</p>
+    </section>
+
+    <!-- ============ 設定：タイマー ============ -->
+    <section id="view-settings-timer" class="view">
+      <header class="page-header">
+        <button id="backFromTimerSettings" class="back-btn" type="button">‹ 設定</button>
+        <p class="eyebrow">TIMER SETTINGS</p>
+        <h2>タイマー設定</h2>
+      </header>
+
+      <div class="s-section">
+        <h4 class="s-title">アラーム音</h4>
+        <div class="panel-list" id="soundList"></div>
+      </div>
+
+      <div class="s-section">
+        <h4 class="s-title">通知方法</h4>
+        <div class="panel-list">
+          <div class="s-row">
+            <div class="s-main"><b>タイマーの音を出す</b></div>
+            <label class="toggle"><input type="checkbox" id="toggleSoundOn"><span class="toggle-track"></span></label>
+          </div>
+          <div class="s-row">
+            <div class="s-main"><b>バイブレーションをする</b><small>対応端末のみ（iPhoneは非対応）</small></div>
+            <label class="toggle"><input type="checkbox" id="toggleVibrateOn"><span class="toggle-track"></span></label>
+          </div>
+          <div class="s-row">
+            <div class="s-main"><b>システム通知をする</b></div>
+            <label class="toggle"><input type="checkbox" id="toggleNotifyOn"><span class="toggle-track"></span></label>
+          </div>
+        </div>
+      </div>
     </section>
 
   </main>
