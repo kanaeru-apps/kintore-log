@@ -51,6 +51,11 @@
     <section id="view-charts" class="view">
       <header class="page-header"><p class="eyebrow">ANALYTICS</p><h2>グラフ・レポート</h2></header>
 
+      <div class="total-vol-card">
+        <span class="total-vol-label">総合計ボリューム（全期間・全種目・全部位）</span>
+        <span class="total-vol-value num" id="totalVolValue">0<small> kg</small></span>
+      </div>
+
       <div class="chart-tabs">
         <button class="chart-tab active" data-ctab="exercise" type="button">種目別</button>
         <button class="chart-tab" data-ctab="volume" type="button">部位別ボリューム</button>
@@ -62,12 +67,8 @@
         <div id="chartExBody"></div>
       </div>
 
-      <!-- 部位別ボリューム -->
+      <!-- 部位別ボリューム（週次グラフの下に月次グラフ） -->
       <div id="chartPaneVolume" class="chart-pane">
-        <div class="chart-range-toggle">
-          <button class="range-btn active" data-range="week" type="button">週次</button>
-          <button class="range-btn" data-range="month" type="button">月次</button>
-        </div>
         <div id="chartVolBody"></div>
       </div>
     </section>
@@ -195,7 +196,7 @@
         </div>
       </div>
 
-      <p class="version">筋トレ記録 v0.3.1 — Phase 3</p>
+      <p class="version">筋トレ記録 v0.3.2 — Phase 3</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->

@@ -15,7 +15,7 @@ var Charts = (function () {
     '腕': '#62e3cb', '腹': '#ff9ec4', 'その他': '#9ba0a8'
   };
 
-  var state = { cardTab: 'exercise', range: 'week', exId: null, bound: false };
+  var state = { cardTab: 'exercise', exId: null, bound: false };
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -256,15 +256,22 @@ var Charts = (function () {
     $('#chartExBody').innerHTML = html;
   }
 
-  function renderVolumePane() {
-    var data = volumeByPartBuckets(state.range);
-    if (!data.maxTotal) { $('#chartVolBody').innerHTML = emptyMsg('まだ記録がありません'); return; }
+  /* 部位別ボリューム1件分（週次 or 月次）のカードHTMLを組み立てる。データが無ければ空メッセージ */
+  function volumeCard(range, title) {
+    var data = volumeByPartBuckets(range);
+    if (!data.maxTotal) return chartCard(title, emptyMsg('まだ記録がありません'));
     var svg = stackedBarChartSvg(data.buckets, data.maxTotal);
     var legend = '<div class="chart-legend">' + data.parts.map(function (p) {
       return '<span class="chart-legend-item"><span class="chart-legend-dot" style="background:' + (PART_COLOR[p] || '#9ba0a8') + '"></span>' + esc(p) + '</span>';
     }).join('') + '</div>';
-    var title = state.range === 'month' ? '部位別ボリューム（月次・直近6ヶ月）' : '部位別ボリューム（週次・直近8週間）';
-    $('#chartVolBody').innerHTML = chartCard(title, svg + legend);
+    return chartCard(title, svg + legend);
+  }
+
+  /* 週次グラフの下に月次グラフを並べて表示 */
+  function renderVolumePane() {
+    $('#chartVolBody').innerHTML =
+      volumeCard('week', '部位別ボリューム（週次・直近8週間）') +
+      volumeCard('month', '部位別ボリューム（月次・直近6ヶ月）');
   }
 
   function populateExSelect() {
@@ -300,18 +307,30 @@ var Charts = (function () {
       state.exId = e.target.value;
       renderExercisePane();
     });
-    $$('.range-btn').forEach(function (b) {
-      b.addEventListener('click', function () {
-        state.range = b.dataset.range;
-        $$('.range-btn').forEach(function (x) { x.classList.toggle('active', x === b); });
-        renderVolumePane();
+  }
+
+  /* 全期間・全種目・全部位を合算した総合計ボリューム（有酸素は対象外） */
+  function totalVolumeAllTime() {
+    var total = 0;
+    DB.datesWithData().forEach(function (date) {
+      var w = DB.getWorkout(date);
+      (w.entries || []).forEach(function (e) {
+        if (e.part === '有酸素') return;
+        e.sets.forEach(function (s) { total += (+s.w || 0) * (+s.r || 0); });
       });
     });
+    return total;
+  }
+  function renderTotalVol() {
+    var el = $('#totalVolValue');
+    if (!el) return;
+    el.innerHTML = fmt1(totalVolumeAllTime()) + '<small> kg</small>';
   }
 
   function init() {
     bindOnce();
     populateExSelect();
+    renderTotalVol();
     if (state.cardTab === 'exercise') renderExercisePane(); else renderVolumePane();
   }
 
