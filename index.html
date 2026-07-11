@@ -50,10 +50,25 @@
     <!-- ============ グラフ ============ -->
     <section id="view-charts" class="view">
       <header class="page-header"><p class="eyebrow">ANALYTICS</p><h2>グラフ・レポート</h2></header>
-      <div class="placeholder">
-        <div class="ph-icon">📈</div>
-        <h3>Phase 3 で実装予定</h3>
-        <p>種目別の重量推移・推定1RM・<br>部位別ボリュームの週次/月次レポートが<br>ここに表示されます。</p>
+
+      <div class="chart-tabs">
+        <button class="chart-tab active" data-ctab="exercise" type="button">種目別</button>
+        <button class="chart-tab" data-ctab="volume" type="button">部位別ボリューム</button>
+      </div>
+
+      <!-- 種目別 -->
+      <div id="chartPaneExercise" class="chart-pane active">
+        <select id="chartExSelect" class="chart-select" aria-label="種目を選択"></select>
+        <div id="chartExBody"></div>
+      </div>
+
+      <!-- 部位別ボリューム -->
+      <div id="chartPaneVolume" class="chart-pane">
+        <div class="chart-range-toggle">
+          <button class="range-btn active" data-range="week" type="button">週次</button>
+          <button class="range-btn" data-range="month" type="button">月次</button>
+        </div>
+        <div id="chartVolBody"></div>
       </div>
     </section>
 
@@ -180,7 +195,7 @@
         </div>
       </div>
 
-      <p class="version">筋トレ記録 v0.2.8 — Phase 2</p>
+      <p class="version">筋トレ記録 v0.3.0 — Phase 3</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -296,6 +311,7 @@
 
 <script src="js/db.js"></script>
 <script src="js/app.js"></script>
+<script src="js/charts.js"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});

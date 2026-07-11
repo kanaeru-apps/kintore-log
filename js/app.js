@@ -1497,6 +1497,7 @@
     $$('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + tab); });
     if (tab === 'log') renderLog(true);
     else if (tab === 'history') renderHistory();
+    else if (tab === 'charts') Charts.init();
     else if (tab === 'timer') timerInit();
     else if (tab === 'calc') calcInit();
     else if (tab === 'settings') renderSettings();

@@ -1,11 +1,12 @@
 /* 筋トレ記録 Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v13';
+const CACHE = 'kintore-v14';
 const ASSETS = [
   './',
   './index.html',
   './css/style.css',
   './js/db.js',
   './js/app.js',
+  './js/charts.js',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png'
