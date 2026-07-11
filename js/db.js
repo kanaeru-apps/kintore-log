@@ -123,6 +123,16 @@ var DB = (function () {
     return null;
   }
 
+  /* 部位・種目名・器具がすべて一致する種目を探す（完全重複チェック用） */
+  function findExercise(name, part, equip) {
+    var eq = equip || '';
+    for (var i = 0; i < state.exercises.length; i++) {
+      var x = state.exercises[i];
+      if (x.part === part && x.name === name && (x.equip || '') === eq) return x;
+    }
+    return null;
+  }
+
   /* 指定日より前の、同じ種目の直近の記録を返す */
   function prevRecord(exId, beforeDate) {
     var dates = Object.keys(state.workouts).filter(function (d) { return d < beforeDate; }).sort().reverse();
@@ -148,6 +158,7 @@ var DB = (function () {
     /* ---- 種目マスタ ---- */
     getExercises: function () { return state.exercises.slice(); },
     getExercise: getExercise,
+    findExercise: findExercise,
     addExercise: function (name, part, equip) {
       var ex = { id: uid(), name: name, part: part, equip: equip || '' };
       state.exercises.push(ex);

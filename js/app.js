@@ -719,6 +719,10 @@
       var name = $('#sheetNewName').value.trim();
       if (!name) { toast('種目名を入力してください'); return; }
       var equip = $('#sheetNewEquip').value;
+      if (DB.findExercise(name, ui.pickerPart, equip)) {
+        toast('「' + name + (equip ? '（' + equip + '）' : '') + '」はすでに登録されています');
+        return;
+      }
       var ex = DB.addExercise(name, ui.pickerPart, equip);
       DB.addEntry(ui.date, ex.id);
       $('#sheetNewName').value = '';
@@ -862,7 +866,12 @@
       var name = $('#newExName').value.trim();
       if (!name) { toast('種目名を入力してください'); return; }
       var part = $('#newExPart').value;
-      DB.addExercise(name, part, $('#newExEquip').value);
+      var equip = $('#newExEquip').value;
+      if (DB.findExercise(name, part, equip)) {
+        toast('「' + name + (equip ? '（' + equip + '）' : '') + '」はすでに登録されています');
+        return;
+      }
+      DB.addExercise(name, part, equip);
       $('#newExName').value = '';
       $('#newExEquip').value = '';
       // 追加した部位だけを開いた状態にする（他は閉じる）
