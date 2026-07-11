@@ -296,18 +296,71 @@ var Charts = (function () {
       return '<button class="chart-pchip' + (p === state.part ? ' active' : '') + '" data-part="' + esc(p) + '" type="button">' + esc(p) + '</button>';
     }).join('');
   }
-  /* 選んだ部位の種目だけを一覧表示（スクロールが長くならないように絞り込む） */
-  function populateExList() {
-    var list = state.part ? DB.getExercises().filter(function (x) { return x.part === state.part; }) : [];
-    if (!state.exId || list.every(function (x) { return x.id !== state.exId; })) {
-      state.exId = list.length ? list[0].id : null;
+  /* 選んだ部位の種目を、重量ドラムと同じ上下スクロールのホイールで1つ選ぶ */
+  var EX_ITEM_H = 44;
+  var exWheelList = [];   // 現在表示中の部位の種目（ホイールの並び順と一致）
+  var exWheelSelIndex = -1;
+
+  function renderExWheel() {
+    exWheelList = state.part ? DB.getExercises().filter(function (x) { return x.part === state.part; }) : [];
+    if (!state.exId || exWheelList.every(function (x) { return x.id !== state.exId; })) {
+      state.exId = exWheelList.length ? exWheelList[0].id : null;
     }
-    $('#chartExList').innerHTML = list.map(function (x) {
-      return '<button class="chart-ex-item' + (x.id === state.exId ? ' active' : '') + '" data-ex="' + x.id + '" type="button">' +
-        '<span>' + esc(x.name) + (x.equip ? '（' + esc(x.equip) + '）' : '') + '</span>' +
-        '<span class="chart-ex-check">✓</span>' +
-      '</button>';
+    $('#chartExWheel').innerHTML = exWheelList.map(function (x) {
+      return '<div class="chart-ex-wheel-item">' + esc(x.name) + (x.equip ? '（' + esc(x.equip) + '）' : '') + '</div>';
     }).join('');
+    var idx = Math.max(0, exWheelList.findIndex(function (x) { return x.id === state.exId; }));
+    exWheelSelIndex = -1;
+    var scroll = $('#chartExScroll');
+    requestAnimationFrame(function () {
+      scroll.scrollTop = idx * EX_ITEM_H;
+      setExWheelSel(idx);
+    });
+  }
+  function setExWheelSel(index) {
+    if (index === exWheelSelIndex) return;
+    var kids = $('#chartExWheel').children;
+    if (exWheelSelIndex >= 0 && kids[exWheelSelIndex]) kids[exWheelSelIndex].classList.remove('sel');
+    if (kids[index]) kids[index].classList.add('sel');
+    exWheelSelIndex = index;
+    if (exWheelList[index]) {
+      state.exId = exWheelList[index].id;
+      renderExercisePane();
+    }
+  }
+  function exWheelIndexFromScroll() {
+    var scroll = $('#chartExScroll');
+    var index = Math.round(scroll.scrollTop / EX_ITEM_H);
+    return Math.max(0, Math.min(exWheelList.length - 1, index));
+  }
+  function bindExWheel() {
+    var scroll = $('#chartExScroll');
+    var ticking = false;
+    scroll.addEventListener('scroll', function () {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () { ticking = false; setExWheelSel(exWheelIndexFromScroll()); });
+    });
+    // マウスの上下ドラッグに対応（タッチはネイティブスクロール＋スナップに任せる）
+    var drag = { active: false, startY: 0, startScroll: 0 };
+    scroll.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'touch') return;
+      drag.active = true; drag.startY = e.clientY; drag.startScroll = scroll.scrollTop;
+      scroll.setPointerCapture(e.pointerId);
+    });
+    scroll.addEventListener('pointermove', function (e) {
+      if (!drag.active) return;
+      scroll.scrollTop = drag.startScroll - (e.clientY - drag.startY);
+    });
+    var endDrag = function () {
+      if (!drag.active) return;
+      drag.active = false;
+      var index = exWheelIndexFromScroll();
+      scroll.scrollTop = index * EX_ITEM_H;
+      setExWheelSel(index);
+    };
+    scroll.addEventListener('pointerup', endDrag);
+    scroll.addEventListener('pointercancel', endDrag);
   }
 
   function switchCTab(tab) {
@@ -329,16 +382,9 @@ var Charts = (function () {
       if (!b) return;
       state.part = b.dataset.part;
       populatePartChips();
-      populateExList();
-      renderExercisePane();
+      renderExWheel();
     });
-    $('#chartExList').addEventListener('click', function (e) {
-      var b = e.target.closest('[data-ex]');
-      if (!b) return;
-      state.exId = b.dataset.ex;
-      populateExList();
-      renderExercisePane();
-    });
+    bindExWheel();
   }
 
   /* 全期間・全種目・全部位を合算した総合計ボリューム（有酸素は対象外） */
@@ -362,7 +408,7 @@ var Charts = (function () {
   function init() {
     bindOnce();
     populatePartChips();
-    populateExList();
+    renderExWheel();
     renderTotalVol();
     if (state.cardTab === 'exercise') renderExercisePane(); else renderVolumePane();
   }

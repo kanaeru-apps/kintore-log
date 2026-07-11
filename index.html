@@ -64,7 +64,12 @@
       <!-- 種目別 -->
       <div id="chartPaneExercise" class="chart-pane active">
         <div id="chartPartChips" class="chart-part-chips"></div>
-        <div id="chartExList" class="chart-ex-list"></div>
+        <div class="chart-ex-picker">
+          <div class="chart-ex-wrap">
+            <div class="chart-ex-highlight"></div>
+            <div class="chart-ex-scroll" id="chartExScroll"><div class="chart-ex-wheel" id="chartExWheel"></div></div>
+          </div>
+        </div>
         <div id="chartExBody"></div>
       </div>
 
@@ -197,7 +202,7 @@
         </div>
       </div>
 
-      <p class="version">筋トレ記録 v0.3.3 — Phase 3</p>
+      <p class="version">筋トレ記録 v0.3.4 — Phase 3</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
