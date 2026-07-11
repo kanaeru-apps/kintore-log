@@ -31,7 +31,6 @@
           <button class="nav-arrow" id="nextDay" aria-label="次の日">›</button>
         </div>
         <button id="todayBtn" class="today-btn">◎ 今日へ戻る</button>
-        <input type="date" id="datePicker" class="hidden-input" tabindex="-1" aria-hidden="true">
       </header>
 
       <div id="dayStats" class="day-stats"></div>
@@ -210,7 +209,7 @@
         </div>
       </div>
 
-      <p class="version">筋トレ記録 v0.4.0 — Phase 3</p>
+      <p class="version">筋トレ記録 v0.4.1 — Phase 3</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -292,6 +291,27 @@
         <select id="sheetNewEquip" aria-label="器具"></select>
         <button id="sheetNewAdd" class="btn primary small">作成して追加</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 日付選択カレンダー（記録タブの日付タップで表示） -->
+  <div id="dateCalBackdrop"></div>
+  <div id="dateCalSheet" role="dialog" aria-label="日付を選択">
+    <div class="drum-head">
+      <button id="dateCalClose" class="drum-cancel">閉じる</button>
+      <span class="drum-title">日付を選択</span>
+      <button id="dateCalToday" class="drum-done">今日</button>
+    </div>
+    <div class="date-cal-body">
+      <div class="cal-header">
+        <button class="cal-nav" id="dateCalPrev" type="button" aria-label="前の月">‹</button>
+        <span class="cal-month num" id="dateCalMonthLabel"></span>
+        <button class="cal-nav" id="dateCalNext" type="button" aria-label="次の月">›</button>
+      </div>
+      <div class="cal-weekdays">
+        <span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span>
+      </div>
+      <div class="cal-grid" id="dateCalGrid"></div>
     </div>
   </div>
 

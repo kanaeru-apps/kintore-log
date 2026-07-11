@@ -32,6 +32,7 @@
   }
 
   var ui = { tab: 'log', date: DB.todayStr(), pickerPart: '胸', expanded: {}, sheetEdit: false, exExpanded: {} };
+  var dateCal = { year: null, month: null };
 
   /* ---------- ユーティリティ ---------- */
   function esc(s) {
@@ -510,7 +511,6 @@
     $('#dateLabel').innerHTML = d.getFullYear() + '/' + pad2(d.getMonth() + 1) + '/' + pad2(d.getDate()) +
       ' <span class="wd">(' + WD[d.getDay()] + ')</span>';
     $('#todayBtn').style.display = (ui.date === DB.todayStr()) ? 'none' : 'inline-block';
-    $('#datePicker').value = ui.date;
 
     var w = DB.getWorkout(ui.date);
 
@@ -642,17 +642,88 @@
     '</article>';
   }
 
+  /* ================== 日付選択カレンダー（記録タブの日付タップで表示） ================== */
+  /* 何かしら記録した日（部位を問わない）の集合を返す */
+  function trainedDatesAny() {
+    var set = {};
+    DB.datesWithData().forEach(function (date) {
+      var w = DB.getWorkout(date);
+      var any = (w.entries || []).some(function (e) { return filledSets(e).length > 0; });
+      if (any) set[date] = true;
+    });
+    return set;
+  }
+  function renderDateCal() {
+    var y = dateCal.year, m = dateCal.month;
+    var first = new Date(y, m, 1);
+    var startDow = first.getDay();
+    var daysInMonth = new Date(y, m + 1, 0).getDate();
+    var prevDays = new Date(y, m, 0).getDate();
+    var trained = trainedDatesAny();
+    var todayStr = DB.todayStr();
+
+    var cells = '';
+    for (var i = 0; i < startDow; i++) {
+      cells += '<span class="cal-day other-month">' + (prevDays - startDow + 1 + i) + '</span>';
+    }
+    for (var d = 1; d <= daysInMonth; d++) {
+      var dateStr = y + '-' + ('0' + (m + 1)).slice(-2) + '-' + ('0' + d).slice(-2);
+      var cls = 'cal-day';
+      if (trained[dateStr]) cls += ' trained';
+      if (dateStr === todayStr) cls += ' today';
+      if (dateStr === ui.date) cls += ' selected';
+      cells += '<span class="' + cls + '" data-date="' + dateStr + '">' + d + '</span>';
+    }
+    var total = startDow + daysInMonth;
+    var trailing = (7 - (total % 7)) % 7;
+    for (var j = 1; j <= trailing; j++) cells += '<span class="cal-day other-month">' + j + '</span>';
+
+    $('#dateCalGrid').innerHTML = cells;
+    $('#dateCalMonthLabel').textContent = y + '年' + (m + 1) + '月';
+  }
+  function shiftDateCalMonth(delta) {
+    var d = new Date(dateCal.year, dateCal.month + delta, 1);
+    dateCal.year = d.getFullYear();
+    dateCal.month = d.getMonth();
+    renderDateCal();
+  }
+  function openDateCal() {
+    var d = parseDate(ui.date);
+    dateCal.year = d.getFullYear();
+    dateCal.month = d.getMonth();
+    renderDateCal();
+    $('#dateCalBackdrop').classList.add('show');
+    $('#dateCalSheet').classList.add('show');
+  }
+  function closeDateCal() {
+    $('#dateCalBackdrop').classList.remove('show');
+    $('#dateCalSheet').classList.remove('show');
+  }
+  function bindDateCal() {
+    $('#dateCalPrev').onclick = function () { shiftDateCalMonth(-1); };
+    $('#dateCalNext').onclick = function () { shiftDateCalMonth(1); };
+    $('#dateCalClose').onclick = closeDateCal;
+    $('#dateCalBackdrop').onclick = closeDateCal;
+    $('#dateCalToday').onclick = function () {
+      ui.date = DB.todayStr();
+      closeDateCal();
+      renderLog(true);
+    };
+    $('#dateCalGrid').addEventListener('click', function (e) {
+      var el = e.target.closest('[data-date]');
+      if (!el) return;
+      ui.date = el.dataset.date;
+      closeDateCal();
+      renderLog(true);
+    });
+  }
+
   function bindLog() {
     $('#prevDay').onclick = function () { ui.date = shiftDate(ui.date, -1); renderLog(true); };
     $('#nextDay').onclick = function () { ui.date = shiftDate(ui.date, 1); renderLog(true); };
     $('#todayBtn').onclick = function () { ui.date = DB.todayStr(); renderLog(true); };
-    $('#dateLabel').onclick = function () {
-      var p = $('#datePicker');
-      if (p.showPicker) { try { p.showPicker(); } catch (e) { p.click(); } } else { p.click(); }
-    };
-    $('#datePicker').onchange = function (e) {
-      if (e.target.value) { ui.date = e.target.value; renderLog(true); }
-    };
+    $('#dateLabel').onclick = openDateCal;
+    bindDateCal();
 
     var memoTimer = null;
     $('#dayMemo').addEventListener('input', function (e) {

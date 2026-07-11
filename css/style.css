@@ -135,14 +135,6 @@ button { cursor: pointer; }
   border-radius: 999px;
 }
 
-.hidden-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
 /* ---------------- 日次サマリータイル ---------------- */
 .day-stats {
   display: grid;
@@ -664,7 +656,9 @@ input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
 }
 .cal-day.other-month { color: #3a3f49; }
 .cal-day.today { border-color: var(--dim); }
-.cal-day.trained { color: var(--ink); font-weight: 700; }
+/* 既定の実施日カラー（ボルトイエロー）。グラフ側の部位別カレンダーはJSのインラインstyleで
+   部位ごとの色に上書きされるため、この既定値は主に記録タブの日付カレンダー（単色）で使われる */
+.cal-day.trained { background: var(--volt); border-color: var(--volt); color: var(--ink); font-weight: 700; }
 
 /* 種目別グラフ：まず部位を選ぶチップ */
 .chart-part-chips {
@@ -1249,6 +1243,37 @@ input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
   padding-bottom: calc(14px + env(safe-area-inset-bottom));
 }
 #ctimeSheet.show { transform: translate(-50%, 0); }
+
+/* 日付選択カレンダー（記録タブの日付タップで表示。重量ドラムと同じシート方式） */
+#dateCalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  z-index: 58;
+}
+#dateCalBackdrop.show { opacity: 1; pointer-events: auto; }
+
+#dateCalSheet {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translate(-50%, 105%);
+  width: 100%;
+  max-width: 480px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 22px 22px 0 0;
+  z-index: 59;
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+}
+#dateCalSheet.show { transform: translate(-50%, 0); }
+.date-cal-body { padding: 4px 18px 6px; }
+.cal-day.selected { box-shadow: 0 0 0 2px var(--volt); }
 
 .drum-head {
   display: flex;
