@@ -51,9 +51,17 @@
     <section id="view-charts" class="view">
       <header class="page-header"><p class="eyebrow">ANALYTICS</p><h2>グラフ・レポート</h2></header>
 
-      <div class="total-vol-card">
-        <span class="total-vol-label">総合計ボリューム（全期間・全種目・全部位）</span>
-        <span class="total-vol-value num" id="totalVolValue">0<small> kg</small></span>
+      <div class="cal-card">
+        <div class="cal-part-chips" id="calPartChips"></div>
+        <div class="cal-header">
+          <button class="cal-nav" id="calPrev" type="button" aria-label="前の月">‹</button>
+          <span class="cal-month num" id="calMonthLabel"></span>
+          <button class="cal-nav" id="calNext" type="button" aria-label="次の月">›</button>
+        </div>
+        <div class="cal-weekdays">
+          <span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span>
+        </div>
+        <div class="cal-grid" id="calGrid"></div>
       </div>
 
       <div class="chart-tabs">
@@ -202,7 +210,7 @@
         </div>
       </div>
 
-      <p class="version">筋トレ記録 v0.3.4 — Phase 3</p>
+      <p class="version">筋トレ記録 v0.4.0 — Phase 3</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
