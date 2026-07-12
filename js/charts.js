@@ -248,6 +248,20 @@ var Charts = (function () {
     return '<div class="empty"><p>' + esc(msg) + '</p></div>';
   }
 
+  var MEDALS = ['🥇', '🥈', '🥉'];
+  /* 種目のベスト記録（日別合計ボリューム）TOP3をメダル付きで表示するカード */
+  function bestRecordCard(exId) {
+    var records = DB.bestRecords(exId, 3);
+    if (!records.length) return '';
+    var rows = records.map(function (r, i) {
+      var d = parseDate(r.date);
+      return '<li class="br-row"><span class="br-medal">' + MEDALS[i] + '</span>' +
+        '<span class="br-date">' + (d.getMonth() + 1) + '/' + d.getDate() + '</span>' +
+        '<span class="br-vol">' + fmt1(r.vol) + ' kg</span></li>';
+    }).join('');
+    return chartCard('ベスト記録 TOP3（合計ボリューム）', '<ol class="best-record-list">' + rows + '</ol>');
+  }
+
   function renderExercisePane() {
     if (!state.exId) { $('#chartExBody').innerHTML = emptyMsg('種目を選択してください'); return; }
     var rows = collectExerciseSessions(state.exId);
@@ -261,6 +275,7 @@ var Charts = (function () {
       html += chartCard('時間の推移（分）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: r.t }; })));
       html += chartCard('距離の推移（km）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: r.d }; })));
     } else {
+      html += bestRecordCard(state.exId);
       html += chartCard('推定1RM推移（kg）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: Math.round(r.rm * 10) / 10 }; })));
       html += chartCard('セッション合計ボリューム（kg）', barChartSvg(recent.map(function (r) { return { label: labelOf(r), value: Math.round(r.vol) }; })));
     }

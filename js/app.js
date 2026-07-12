@@ -169,6 +169,22 @@
     toastTimer = setTimeout(function () { t.classList.remove('show'); }, 1800);
   }
 
+  /* その種目・その日の合計ボリュームがTOP3入りしていたらメダルをトースト表示する。
+     同じ順位を連続で出さないよう、種目×日付ごとに直近表示した順位を覚えておく（画面再読み込みでリセット）。 */
+  var recordToastShown = {};
+  function checkRecordToast(entryId) {
+    var w = DB.getWorkout(ui.date);
+    var entry = ((w && w.entries) || []).filter(function (x) { return x.id === entryId; })[0];
+    if (!entry) return;
+    var rank = DB.rankOnDate(entry.exId, ui.date);
+    if (!rank) return;
+    var key = entry.exId + '|' + ui.date;
+    if (recordToastShown[key] === rank) return;
+    recordToastShown[key] = rank;
+    var medal = rank === 1 ? '🥇' : (rank === 2 ? '🥈' : '🥉');
+    toast(medal + ' ' + entry.name + ' 自己ベスト更新！(' + rank + '位)');
+  }
+
   /* ================== 種目情報モーダル ================== */
   var infoExId = null;
 
@@ -302,6 +318,7 @@
     if (commit && drumTarget) {
       var v = drumSelIndex >= 0 ? drumSelIndex * DRUM_STEP : 0;
       DB.updateSet(ui.date, drumTarget.entryId, drumTarget.idx, 'w', v);
+      checkRecordToast(drumTarget.entryId);
     }
     $('#drumBackdrop').classList.remove('show');
     $('#drumSheet').classList.remove('show');
@@ -581,7 +598,7 @@
         '<span class="times">kg ×</span>' +
         '<div class="stepper">' +
           '<button data-action="r-" aria-label="回数を減らす">−</button>' +
-          '<input type="number" inputmode="numeric" step="1" min="0" data-field="r" value="' + esc(s.r) + '" placeholder="回">' +
+          '<input type="text" inputmode="numeric" pattern="[0-9]*" data-field="r" value="' + esc(s.r) + '" placeholder="回">' +
           '<button data-action="r+" aria-label="回数を増やす">＋</button>' +
         '</div>' +
         '<button class="set-del" data-action="del-set" aria-label="セット削除">✕</button>' +
@@ -610,10 +627,13 @@
         '</span>' +
       '</label>';
       var cells = timeCell + CARDIO_FIELDS.map(function (f) {
+        var isInt = f.step.indexOf('.') < 0;
+        var mode = isInt ? 'numeric' : 'decimal';
+        var patternAttr = isInt ? ' pattern="[0-9]*"' : '';
         return '<label class="cf">' +
           '<span class="cf-label">' + f.label + '</span>' +
           '<span class="cf-inputwrap">' +
-            '<input type="number" inputmode="decimal" step="' + f.step + '" min="0" data-field="' + f.k + '" value="' + esc(s[f.k]) + '" placeholder="0">' +
+            '<input type="text" inputmode="' + mode + '"' + patternAttr + ' data-field="' + f.k + '" value="' + esc(s[f.k]) + '" placeholder="0">' +
             '<span class="cf-unit">' + f.unit + '</span>' +
           '</span>' +
         '</label>';
@@ -774,6 +794,7 @@
         var val = Math.max(0, ((s && +s[field]) || 0) + delta);
         val = Math.round(val * 100) / 100;
         DB.updateSet(ui.date, id, idx, field, val);
+        checkRecordToast(id);
         renderLog();
       }
     });
@@ -787,6 +808,7 @@
       if (!entryEl || !rowEl) return;
       var v = (input.value === '') ? '' : Math.max(0, parseFloat(input.value) || 0);
       DB.updateSet(ui.date, entryEl.dataset.entry, +rowEl.dataset.idx, input.dataset.field, v);
+      checkRecordToast(entryEl.dataset.entry);
       renderLog();
     });
   }
@@ -1508,8 +1530,19 @@
   }
 
   /* ---- カウントダウン本体（終了時刻の実時刻ベース＝復帰時に自己補正） ---- */
-  function startTick() { stopTick(); timer.tick = setInterval(tickTimer, 200); }
-  function stopTick() { if (timer.tick) { clearInterval(timer.tick); timer.tick = null; } }
+  /* 表示更新は200ms間隔のintervalだが、バックグラウンドではintervalが止まりうるため、
+     終了判定そのものは独立したsetTimeoutで行う（バックグラウンドでも発火しやすくするため）。 */
+  function startTick() { stopTick(); timer.tick = setInterval(tickTimer, 200); scheduleFinishTimeout(); }
+  function stopTick() { if (timer.tick) { clearInterval(timer.tick); timer.tick = null; } clearFinishTimeout(); }
+  function scheduleFinishTimeout() {
+    clearFinishTimeout();
+    var ms = timer.endAt - Date.now();
+    timer.finishTimeout = setTimeout(function () {
+      timer.finishTimeout = null;
+      if (timer.running && !timer.paused) finishTimer();
+    }, Math.max(0, ms));
+  }
+  function clearFinishTimeout() { if (timer.finishTimeout) { clearTimeout(timer.finishTimeout); timer.finishTimeout = null; } }
   function tickTimer() {
     if (!timer.running || timer.paused) return;
     timer.remaining = (timer.endAt - Date.now()) / 1000;
@@ -1535,6 +1568,7 @@
     renderTimer();
   }
   function finishTimer() {
+    if (timer.finished) return;
     stopTick();
     timer.running = false;
     timer.paused = false;
@@ -1567,7 +1601,7 @@
     if (timer.finished) return;
     timer.total += sec;
     if (timer.paused) timer.remaining += sec;
-    else { timer.endAt += sec * 1000; timer.remaining = (timer.endAt - Date.now()) / 1000; }
+    else { timer.endAt += sec * 1000; timer.remaining = (timer.endAt - Date.now()) / 1000; scheduleFinishTimeout(); }
     // −30秒で残りが尽きたら終了扱い（一時停止中はtickが動かないためここで確定させる）
     if (timer.remaining <= 0) { finishTimer(); return; }
     renderTimer();

@@ -211,7 +211,7 @@
         </div>
       </div>
 
-      <p class="version">筋トレ記録 v0.4.2 — Phase 3</p>
+      <p class="version">筋トレ記録 v0.5.0 — Phase 3</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -344,7 +344,7 @@
     <div class="drum-direct">
       <label for="drumDirectInput">数字で直接入力</label>
       <div class="drum-direct-row">
-        <input type="number" id="drumDirectInput" inputmode="decimal" step="0.5" min="0" max="300" placeholder="例: 62.5">
+        <input type="text" id="drumDirectInput" inputmode="decimal" placeholder="例: 62.5">
         <span class="drum-direct-unit">kg</span>
       </div>
     </div>
@@ -376,9 +376,9 @@
     <div class="drum-direct">
       <label>数字で直接入力</label>
       <div class="ctime-direct-row">
-        <input type="number" id="ctimeHInput" inputmode="numeric" min="0" max="5" placeholder="0"><span>時間</span>
-        <input type="number" id="ctimeMInput" inputmode="numeric" min="0" max="59" placeholder="0"><span>分</span>
-        <input type="number" id="ctimeSInput" inputmode="numeric" min="0" max="59" placeholder="0"><span>秒</span>
+        <input type="text" id="ctimeHInput" inputmode="numeric" pattern="[0-9]*" placeholder="0"><span>時間</span>
+        <input type="text" id="ctimeMInput" inputmode="numeric" pattern="[0-9]*" placeholder="0"><span>分</span>
+        <input type="text" id="ctimeSInput" inputmode="numeric" pattern="[0-9]*" placeholder="0"><span>秒</span>
       </div>
     </div>
   </div>

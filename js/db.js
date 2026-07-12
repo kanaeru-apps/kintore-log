@@ -150,6 +150,40 @@ var DB = (function () {
     return null;
   }
 
+  /* 種目ごとに「日付→その日の合計ボリューム(重量×回数の総和)」を集計する（有酸素は対象外） */
+  function volumeByDateForExercise(exId) {
+    var byDate = {};
+    Object.keys(state.workouts).forEach(function (date) {
+      var w = state.workouts[date];
+      (w.entries || []).forEach(function (e) {
+        if (e.exId !== exId || isCardioPart(e.part)) return;
+        var vol = (e.sets || []).reduce(function (sum, s) {
+          return sum + ((+s.w || 0) * (+s.r || 0));
+        }, 0);
+        if (vol > 0) byDate[date] = (byDate[date] || 0) + vol;
+      });
+    });
+    return byDate;
+  }
+  function rankedRecords(exId) {
+    var byDate = volumeByDateForExercise(exId);
+    var list = Object.keys(byDate).map(function (d) { return { date: d, vol: byDate[d] }; });
+    list.sort(function (a, b) { return b.vol - a.vol || (a.date < b.date ? -1 : 1); });
+    return list;
+  }
+  /* 種目の合計ボリューム上位N件（日付ごと）を返す */
+  function bestRecords(exId, topN) {
+    return rankedRecords(exId).slice(0, topN || 3);
+  }
+  /* 指定日のその種目の順位（1位=1）を返す。TOP3圏外またはその日に記録が無ければnull */
+  function rankOnDate(exId, date) {
+    var list = rankedRecords(exId);
+    for (var i = 0; i < list.length && i < 3; i++) {
+      if (list[i].date === date) return i + 1;
+    }
+    return null;
+  }
+
   load();
 
   return {
@@ -253,6 +287,8 @@ var DB = (function () {
     },
     setMemo: function (date, text) { ensure(date).memo = text; save(); },
     prevRecord: prevRecord,
+    bestRecords: bestRecords,
+    rankOnDate: rankOnDate,
 
     /* ---- 集計・ユーティリティ ---- */
     datesWithData: function () {
