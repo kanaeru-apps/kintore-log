@@ -60,6 +60,16 @@ var DB = (function () {
     }
   }
 
+  function datesWithData() {
+    return Object.keys(state.workouts).filter(function (d) {
+      var w = state.workouts[d];
+      return (w.entries && w.entries.length) || w.memo || w.condition;
+    }).sort();
+  }
+
+  /* スプレッドシート同期用：前回同期以降に変更された日付を記憶する（クラウド連携機能で使用） */
+  function markDirty(date) { state.dirtyDates[date] = true; }
+
   /* 既存データを新しいデータ構造に引き上げる */
   function migrate() {
     if (state.version >= 2) return;
@@ -84,13 +94,24 @@ var DB = (function () {
       var raw = localStorage.getItem(KEY);
       if (raw) {
         var s = JSON.parse(raw);
-        if (s && s.exercises && s.workouts) { state = s; migrate(); return; }
+        if (s && s.exercises && s.workouts) {
+          state = s;
+          migrate();
+          if (!state.dirtyDates) {
+            // 同期機能を導入する前からのデータ：初回同期で全履歴を送れるよう既存の記録日をすべてdirty扱いにする
+            state.dirtyDates = {};
+            datesWithData().forEach(function (d) { state.dirtyDates[d] = true; });
+            save();
+          }
+          return;
+        }
       }
     } catch (e) { /* 壊れていたら初期化 */ }
     state = {
       version: 2,
       exercises: DEFAULTS.map(function (d, i) { return { id: 'd' + i, name: d[0], part: d[1], equip: d[2] }; }),
-      workouts: {}
+      workouts: {},
+      dirtyDates: {}
     };
     save();
   }
@@ -234,7 +255,7 @@ var DB = (function () {
 
     /* ---- ワークアウト ---- */
     getWorkout: getWorkout,
-    deleteWorkout: function (date) { delete state.workouts[date]; save(); },
+    deleteWorkout: function (date) { delete state.workouts[date]; markDirty(date); save(); },
     addEntry: function (date, exId) {
       var ex = getExercise(exId);
       if (!ex) return null;
@@ -253,6 +274,7 @@ var DB = (function () {
         entry.sets.push(pad ? copySet(ex.part, pad) : emptySet(ex.part));
       }
       w.entries.push(entry);
+      markDirty(date);
       save();
       return entry;
     },
@@ -260,6 +282,7 @@ var DB = (function () {
       var w = getWorkout(date);
       if (!w) return;
       w.entries = w.entries.filter(function (e) { return e.id !== entryId; });
+      markDirty(date);
       save();
     },
     addSet: function (date, entryId) {
@@ -271,6 +294,7 @@ var DB = (function () {
         last = prev ? prev.sets[prev.sets.length - 1] : null;
       }
       e.sets.push(last ? copySet(e.part, last) : emptySet(e.part));
+      markDirty(date);
       save();
     },
     getSet: function (date, entryId, idx) {
@@ -279,30 +303,32 @@ var DB = (function () {
     },
     updateSet: function (date, entryId, idx, field, val) {
       var e = findEntry(date, entryId);
-      if (e && e.sets[idx]) { e.sets[idx][field] = val; save(); }
+      if (e && e.sets[idx]) { e.sets[idx][field] = val; markDirty(date); save(); }
     },
     removeSet: function (date, entryId, idx) {
       var e = findEntry(date, entryId);
-      if (e) { e.sets.splice(idx, 1); save(); }
+      if (e) { e.sets.splice(idx, 1); markDirty(date); save(); }
     },
-    setMemo: function (date, text) { ensure(date).memo = text; save(); },
+    setMemo: function (date, text) { ensure(date).memo = text; markDirty(date); save(); },
     prevRecord: prevRecord,
     bestRecords: bestRecords,
     rankOnDate: rankOnDate,
 
     /* ---- 集計・ユーティリティ ---- */
-    datesWithData: function () {
-      return Object.keys(state.workouts).filter(function (d) {
-        var w = state.workouts[d];
-        return (w.entries && w.entries.length) || w.memo || w.condition;
-      }).sort();
-    },
+    datesWithData: datesWithData,
     sizeKB: function () {
       try { return (JSON.stringify(state).length / 1024).toFixed(1); } catch (e) { return '?'; }
     },
     wipe: function () {
       try { localStorage.removeItem(KEY); } catch (e) { /* noop */ }
       load();
+    },
+
+    /* ---- クラウド同期（スプレッドシート） ---- */
+    dirtyDates: function () { return Object.keys(state.dirtyDates || {}).sort(); },
+    clearDirty: function (dates) {
+      (dates || []).forEach(function (d) { delete state.dirtyDates[d]; });
+      save();
     }
   };
 })();

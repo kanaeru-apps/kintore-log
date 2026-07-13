@@ -1127,9 +1127,107 @@
       }).join('') + '</div>' : '');
     }).join('');
     $('#storageInfo').textContent = 'ブラウザ内に保存中 · 約 ' + DB.sizeKB() + ' KB';
+    renderSyncSection();
+  }
+
+  /* ================== クラウド同期（スプレッドシート・Phase 4） ==================
+     一般公開時に非エンジニアのユーザーを混乱させないよう、設定画面には常時表示しない。
+     設定画面末尾のバージョン表示を7回連続タップすると解除され、以後はこの端末で常に表示される。 */
+  var SYNC_UNLOCK_KEY = 'kintore_sync_unlocked';
+  var GAS_URL_KEY = 'kintore_gas_url';
+  var LAST_SYNC_KEY = 'kintore_last_sync';
+
+  function syncUnlocked() { try { return localStorage.getItem(SYNC_UNLOCK_KEY) === '1'; } catch (e) { return false; } }
+  function getGasUrl() { try { return localStorage.getItem(GAS_URL_KEY) || ''; } catch (e) { return ''; } }
+  function setGasUrl(url) { try { localStorage.setItem(GAS_URL_KEY, url); } catch (e) { /* noop */ } }
+  function getLastSync() { try { return localStorage.getItem(LAST_SYNC_KEY) || ''; } catch (e) { return ''; } }
+  function setLastSync(iso) { try { localStorage.setItem(LAST_SYNC_KEY, iso); } catch (e) { /* noop */ } }
+
+  var versionTapCount = 0;
+  var versionTapTimer = null;
+  function onVersionTap() {
+    clearTimeout(versionTapTimer);
+    versionTapCount++;
+    versionTapTimer = setTimeout(function () { versionTapCount = 0; }, 1500);
+    if (versionTapCount < 7) return;
+    versionTapCount = 0;
+    if (!syncUnlocked()) {
+      try { localStorage.setItem(SYNC_UNLOCK_KEY, '1'); } catch (e) { /* noop */ }
+      toast('クラウド同期を表示しました');
+      renderSyncSection();
+    }
+  }
+
+  function renderSyncSection() {
+    var box = $('#syncSectionContainer');
+    if (!box) return;
+    if (!syncUnlocked()) { box.innerHTML = ''; return; }
+    var pending = DB.dirtyDates().length;
+    var last = getLastSync();
+    var lastText = last ? new Date(last).toLocaleString('ja-JP') : '未同期';
+    if (pending) lastText += '（未送信 ' + pending + '件）';
+    box.innerHTML =
+      '<div class="s-section">' +
+        '<h4 class="s-title">クラウド同期</h4>' +
+        '<div class="panel-list">' +
+          '<div class="s-row">' +
+            '<div class="s-main"><b>GAS Web AppのURL</b><small>スプレッドシート連携用に発行したURLを貼り付け</small></div>' +
+          '</div>' +
+          '<div class="s-row">' +
+            '<input id="gasUrlInput" class="sync-url-input" type="text" placeholder="https://script.google.com/macros/s/.../exec" value="' + esc(getGasUrl()) + '">' +
+          '</div>' +
+          '<div class="s-row">' +
+            '<div class="s-main"><b>最終同期</b><small id="syncStatusText">' + esc(lastText) + '</small></div>' +
+            '<button class="link" id="syncNowBtn" type="button">今すぐバックアップ</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function runSync() {
+    var url = getGasUrl();
+    if (!url) { toast('GAS Web AppのURLを入力してください'); return; }
+    var dates = DB.dirtyDates();
+    if (!dates.length) { toast('変更はありません'); return; }
+    var payload = { dates: dates, rows: [] };
+    dates.forEach(function (date) {
+      rowsForDate(date).forEach(function (row) { payload.rows.push(row); });
+    });
+    var btn = $('#syncNowBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '送信中…'; }
+    fetch(url, {
+      method: 'POST',
+      // GASのWeb Appはプリフライト(OPTIONS)に応答しないため、text/plainで送りCORSプリフライトを回避する
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    })
+      .then(function (res) { return res.json().catch(function () { return { ok: true }; }); })
+      .then(function (json) {
+        if (json && json.ok === false) throw new Error(json.error || 'sync failed');
+        DB.clearDirty(dates);
+        setLastSync(new Date().toISOString());
+        toast('バックアップが完了しました（' + dates.length + '日分）');
+      })
+      .catch(function () {
+        toast('バックアップに失敗しました。URLや通信環境を確認してください');
+      })
+      .then(function () {
+        if (btn) { btn.disabled = false; btn.textContent = '今すぐバックアップ'; }
+        renderSyncSection();
+      });
   }
 
   function bindSettings() {
+    var versionEl = $('.version');
+    if (versionEl) versionEl.addEventListener('click', onVersionTap);
+
+    $('#syncSectionContainer').addEventListener('change', function (e) {
+      if (e.target.id === 'gasUrlInput') setGasUrl(e.target.value.trim());
+    });
+    $('#syncSectionContainer').addEventListener('click', function (e) {
+      if (e.target.id === 'syncNowBtn') runSync();
+    });
+
     $('#addExBtn').onclick = function () {
       var name = $('#newExName').value.trim();
       if (!name) { toast('種目名を入力してください'); return; }
@@ -1193,41 +1291,49 @@
     };
   }
 
-  /* ================== CSVエクスポート ================== */
+  /* ================== CSVエクスポート・スプレッドシート同期 共通の行データ ================== */
+  var ROW_HEAD = ['日付', '曜日', '部位', '種目', '器具', 'セット',
+    '重量kg', '回数', 'ボリュームkg',
+    '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ'];
+  /* 指定日の記録を17列の行配列（ROW_HEADと同じ並び）に変換する。記録が無ければ空配列 */
+  function rowsForDate(date) {
+    var w = DB.getWorkout(date);
+    if (!w) return [];
+    var d = parseDate(date);
+    var val = function (x) { return (x === '' || x == null) ? '' : x; };
+    var rows = [];
+    (w.entries || []).forEach(function (e) {
+      var cardio = isCardio(e);
+      e.sets.forEach(function (s, i) {
+        rows.push([
+          date, WD[d.getDay()], e.part, e.name, e.equip || '', i + 1,
+          cardio ? '' : val(s.w),
+          cardio ? '' : val(s.r),
+          cardio ? '' : (+s.w || 0) * (+s.r || 0),
+          cardio ? val(s.t) : '',
+          cardio ? val(s.ts) : '',
+          cardio ? val(s.d) : '',
+          cardio ? val(s.sp) : '',
+          cardio ? val(s.inc) : '',
+          cardio ? val(s.cal) : '',
+          cardio ? val(s.hr) : '',
+          w.memo || ''
+        ]);
+      });
+    });
+    return rows;
+  }
+
   function exportCSV() {
     var dates = DB.datesWithData();
     if (!dates.length) { toast('書き出す記録がありません'); return; }
-    var head = ['日付', '曜日', '部位', '種目', '器具', 'セット',
-      '重量kg', '回数', 'ボリュームkg',
-      '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ'];
-    var lines = [head.join(',')];
     var csv = function (v) {
       v = String(v == null ? '' : v);
       return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
     };
-    var val = function (x) { return (x === '' || x == null) ? '' : x; };
+    var lines = [ROW_HEAD.join(',')];
     dates.forEach(function (date) {
-      var w = DB.getWorkout(date);
-      var d = parseDate(date);
-      (w.entries || []).forEach(function (e) {
-        var cardio = isCardio(e);
-        e.sets.forEach(function (s, i) {
-          lines.push([
-            date, WD[d.getDay()], e.part, e.name, e.equip || '', i + 1,
-            cardio ? '' : val(s.w),
-            cardio ? '' : val(s.r),
-            cardio ? '' : (+s.w || 0) * (+s.r || 0),
-            cardio ? val(s.t) : '',
-            cardio ? val(s.ts) : '',
-            cardio ? val(s.d) : '',
-            cardio ? val(s.sp) : '',
-            cardio ? val(s.inc) : '',
-            cardio ? val(s.cal) : '',
-            cardio ? val(s.hr) : '',
-            w.memo || ''
-          ].map(csv).join(','));
-        });
-      });
+      rowsForDate(date).forEach(function (row) { lines.push(row.map(csv).join(',')); });
     });
     var blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv' }); // BOM付きでExcel文字化け防止
     var a = document.createElement('a');

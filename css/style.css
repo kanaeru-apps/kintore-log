@@ -788,6 +788,19 @@ button { cursor: pointer; }
   font-size: 14px;
 }
 .add-ex-form input:focus { outline: none; border-color: var(--volt); }
+
+.sync-url-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text);
+}
+.sync-url-input:focus { outline: none; border-color: var(--volt); }
 .add-ex-row { display: flex; gap: 8px; }
 .add-ex-row select {
   flex: 1;
