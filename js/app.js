@@ -250,15 +250,28 @@
     });
   }
 
+  /* ================== 重量±ボタンの刻み幅（設定で変更可） ================== */
+  var WEIGHT_STEP_OPTIONS = [0.5, 1.25, 2.5];
+  var weightStepSettings = { step: 2.5 }; // 既定値は従来どおり2.5kg
+  function loadWeightStepSettings() {
+    try {
+      var v = parseFloat(localStorage.getItem('kintore_weight_step'));
+      if (WEIGHT_STEP_OPTIONS.indexOf(v) !== -1) weightStepSettings.step = v;
+    } catch (e) { /* noop */ }
+  }
+  function saveWeightStepSettings() {
+    try { localStorage.setItem('kintore_weight_step', String(weightStepSettings.step)); } catch (e) { /* noop */ }
+  }
+
   /* ================== 重量ドラムロールピッカー ================== */
-  var DRUM_STEP = 0.5;      // 0.5kg刻み
+  var DRUM_STEP = 0.25;     // 0.25kg刻み（0.5/1.25/2.5kgなど主要なプレート単位すべてにピッタリ止まれる）
   var DRUM_MAX = 300;       // 最大300kg
   var DRUM_ITEM_H = 44;     // 各項目の高さ(px)。CSSと一致させること
   var drumTarget = null;    // { entryId, idx }
   var drumSelIndex = -1;
   var drumBuilt = false;
 
-  function drumFmt(v) { return (v % 1 === 0) ? String(v) : v.toFixed(1); }
+  function drumFmt(v) { return (v % 1 === 0) ? String(v) : String(Math.round(v * 100) / 100); }
 
   function buildDrumList() {
     if (drumBuilt) return;
@@ -316,7 +329,7 @@
 
   function closeDrum(commit) {
     if (commit && drumTarget) {
-      var v = drumSelIndex >= 0 ? drumSelIndex * DRUM_STEP : 0;
+      var v = drumSelIndex >= 0 ? Math.round(drumSelIndex * DRUM_STEP * 100) / 100 : 0;
       DB.updateSet(ui.date, drumTarget.entryId, drumTarget.idx, 'w', v);
       checkRecordToast(drumTarget.entryId);
     }
@@ -370,6 +383,119 @@
       var index = Math.round(v / DRUM_STEP);
       scroll.scrollTop = index * DRUM_ITEM_H;
       setDrumSel(index);
+    });
+  }
+
+  /* ================== 回数ドラムロールピッカー（重量ドラムと同じ操作方式） ================== */
+  var REPS_MAX = 50;        // 0〜50回
+  var REPS_ITEM_H = 44;     // CSSと一致させること（.drum-item と共通）
+  var repsTarget = null;    // { entryId, idx }
+  var repsSelIndex = -1;
+  var repsBuilt = false;
+
+  function buildRepsList() {
+    if (repsBuilt) return;
+    var html = '';
+    for (var i = 0; i <= REPS_MAX; i++) html += '<div class="drum-item num">' + i + '</div>';
+    $('#repsList').innerHTML = html;
+    repsBuilt = true;
+  }
+
+  function setRepsSel(index) {
+    if (index === repsSelIndex) return;
+    var kids = $('#repsList').children;
+    if (repsSelIndex >= 0 && kids[repsSelIndex]) kids[repsSelIndex].classList.remove('sel');
+    if (kids[index]) kids[index].classList.add('sel');
+    repsSelIndex = index;
+    var input = $('#repsDirectInput');
+    if (input && document.activeElement !== input) input.value = String(index);
+  }
+
+  function repsIndexFromScroll() {
+    var scroll = $('#repsScroll');
+    var index = Math.round(scroll.scrollTop / REPS_ITEM_H);
+    return Math.max(0, Math.min(REPS_MAX, index));
+  }
+
+  function openRepsDrum(entryId, idx) {
+    buildRepsList();
+    repsTarget = { entryId: entryId, idx: idx };
+
+    var s = DB.getSet(ui.date, entryId, idx);
+    var cur = (s && s.r !== '' && s.r != null) ? +s.r : 0;
+    cur = Math.max(0, Math.min(REPS_MAX, Math.round(cur)));
+
+    var w = DB.getWorkout(ui.date);
+    var ent = ((w && w.entries) || []).filter(function (x) { return x.id === entryId; })[0];
+    $('#repsTitle').textContent = (ent ? ent.name : '') + '　' + (idx + 1) + 'セット目';
+
+    $('#repsBackdrop').classList.add('show');
+    $('#repsSheet').classList.add('show');
+    $('#repsDirectInput').value = String(cur);
+
+    repsSelIndex = -1;
+    var scroll = $('#repsScroll');
+    requestAnimationFrame(function () {
+      scroll.scrollTop = cur * REPS_ITEM_H;
+      setRepsSel(cur);
+    });
+  }
+
+  function closeRepsDrum(commit) {
+    if (commit && repsTarget) {
+      var v = repsSelIndex >= 0 ? repsSelIndex : 0;
+      DB.updateSet(ui.date, repsTarget.entryId, repsTarget.idx, 'r', v);
+      checkRecordToast(repsTarget.entryId);
+    }
+    $('#repsBackdrop').classList.remove('show');
+    $('#repsSheet').classList.remove('show');
+    repsTarget = null;
+    if (commit) renderLog();
+  }
+
+  function bindRepsDrum() {
+    var scroll = $('#repsScroll');
+    var ticking = false;
+    scroll.addEventListener('scroll', function () {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () { ticking = false; setRepsSel(repsIndexFromScroll()); });
+    });
+
+    // マウスの上下ドラッグに対応（タッチはネイティブスクロール＋スナップに任せる）
+    var drag = { active: false, startY: 0, startScroll: 0 };
+    scroll.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'touch') return;
+      drag.active = true;
+      drag.startY = e.clientY;
+      drag.startScroll = scroll.scrollTop;
+      scroll.setPointerCapture(e.pointerId);
+    });
+    scroll.addEventListener('pointermove', function (e) {
+      if (!drag.active) return;
+      scroll.scrollTop = drag.startScroll - (e.clientY - drag.startY);
+    });
+    var endDrag = function () {
+      if (!drag.active) return;
+      drag.active = false;
+      var index = repsIndexFromScroll();
+      scroll.scrollTop = index * REPS_ITEM_H; // 最寄りにスナップ
+      setRepsSel(index);
+    };
+    scroll.addEventListener('pointerup', endDrag);
+    scroll.addEventListener('pointercancel', endDrag);
+
+    $('#repsDone').onclick = function () { closeRepsDrum(true); };
+    $('#repsCancel').onclick = function () { closeRepsDrum(false); };
+    $('#repsBackdrop').onclick = function () { closeRepsDrum(false); };
+
+    // 数字の直接入力 → ホイールをその値へスクロールして同期させる
+    $('#repsDirectInput').addEventListener('input', function (e) {
+      var v = parseInt(e.target.value, 10);
+      if (isNaN(v)) return;
+      v = Math.max(0, Math.min(REPS_MAX, v));
+      scroll.scrollTop = v * REPS_ITEM_H;
+      setRepsSel(v);
     });
   }
 
@@ -598,7 +724,8 @@
         '<span class="times">kg ×</span>' +
         '<div class="stepper">' +
           '<button data-action="r-" aria-label="回数を減らす">−</button>' +
-          '<input type="text" inputmode="numeric" pattern="[0-9]*" data-field="r" value="' + esc(s.r) + '" placeholder="回">' +
+          '<button class="w-display num' + (s.r === '' ? ' empty' : '') + '" data-action="r-drum" aria-label="回数を選択">' +
+            (s.r === '' ? '回' : esc(s.r)) + '</button>' +
           '<button data-action="r+" aria-label="回数を増やす">＋</button>' +
         '</div>' +
         '<button class="set-del" data-action="del-set" aria-label="セット削除">✕</button>' +
@@ -771,6 +898,8 @@
         if (enti) openExInfo(enti.exId, enti);
       } else if (a === 'w-drum') {
         openDrum(id, idx);
+      } else if (a === 'r-drum') {
+        openRepsDrum(id, idx);
       } else if (a === 'ctime-open') {
         openCtime(id, idx);
       } else if (a === 'del-entry') {
@@ -789,7 +918,7 @@
         renderLog();
       } else if (a === 'w-' || a === 'w+' || a === 'r-' || a === 'r+') {
         var field = (a.charAt(0) === 'w') ? 'w' : 'r';
-        var delta = (a.charAt(1) === '+' ? 1 : -1) * (field === 'w' ? 2.5 : 1);
+        var delta = (a.charAt(1) === '+' ? 1 : -1) * (field === 'w' ? weightStepSettings.step : 1);
         var s = DB.getSet(ui.date, id, idx);
         var val = Math.max(0, ((s && +s[field]) || 0) + delta);
         val = Math.round(val * 100) / 100;
@@ -1128,6 +1257,19 @@
     }).join('');
     $('#storageInfo').textContent = 'ブラウザ内に保存中 · 約 ' + DB.sizeKB() + ' KB';
     renderSyncSection();
+    renderWeightStepSettings();
+  }
+
+  /* ================== 記録：重量±ボタンの刻み幅設定 ================== */
+  function renderWeightStepSettings() {
+    var box = $('#weightStepList');
+    if (!box) return;
+    box.innerHTML = WEIGHT_STEP_OPTIONS.map(function (v) {
+      return '<button class="sound-row' + (v === weightStepSettings.step ? ' selected' : '') + '" data-wstep="' + v + '" type="button">' +
+        '<span class="sound-name">' + drumFmt(v) + ' kg ずつ</span>' +
+        '<span class="sound-check">✓</span>' +
+      '</button>';
+    }).join('');
   }
 
   /* ================== クラウド同期（スプレッドシート・Phase 4） ==================
@@ -1226,6 +1368,14 @@
     });
     $('#syncSectionContainer').addEventListener('click', function (e) {
       if (e.target.id === 'syncNowBtn') runSync();
+    });
+
+    $('#weightStepList').addEventListener('click', function (e) {
+      var row = e.target.closest('[data-wstep]');
+      if (!row) return;
+      weightStepSettings.step = parseFloat(row.dataset.wstep);
+      saveWeightStepSettings();
+      renderWeightStepSettings();
     });
 
     $('#addExBtn').onclick = function () {
@@ -1437,6 +1587,7 @@
     total: 0, endAt: 0, remaining: 0,
     running: false, paused: false, finished: false,
     tick: null, wakeLock: null, audioCtx: null, beepNodes: [],
+    audioElUnlocked: false, alarmBlobUrl: null,
     customMin: 3,
     twBuilt: false, twBound: false, twSel: -1
   };
@@ -1510,7 +1661,30 @@
     return Math.max(0, Math.min(TW_MAX_MIN - 1, idx));
   }
 
-  /* ---- 音（Web Audio。タップ時にアンロックし、終了時にビープ） ---- */
+  /* ---- 音（<audio>要素方式。iOS SafariはWeb Audio API(AudioContext)よりも
+     <audio>要素のほうがバックグラウンド再生中の他アプリ(Amazon Audible等)と
+     共存しやすい傾向があるため、オシレーターで合成した音をOfflineAudioContextで
+     レンダリング→WAVエンコードし、<audio>要素で再生する。
+     タップ時（unlockAudio）に、無音の短いWAVをユーザー操作の同期コールスタック内で
+     一度再生→即停止してアンロックしておく（iOSはユーザー操作から非同期処理を挟んだ
+     後のplay()を許可しないことが多いため、実アラーム音のレンダリング完了を待たずに
+     即座にアンロックする必要がある）。実アラーム音は同時に非同期でレンダリングし
+     キャッシュしておき、タイマー終了時はそのキャッシュを同じ<audio>要素で再生する。 ---- */
+  var SILENT_WAV_URL = (function () {
+    // 1chモノラル・8kHz・16bit・約0.05秒(400サンプル)の無音WAV。ArrayBufferは既定でゼロ埋めなのでそのまま無音になる
+    var sampleRate = 8000, samples = 400, dataSize = samples * 2;
+    var ab = new ArrayBuffer(44 + dataSize);
+    var view = new DataView(ab);
+    function writeStr(off, s) { for (var i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); }
+    writeStr(0, 'RIFF'); view.setUint32(4, 36 + dataSize, true); writeStr(8, 'WAVE');
+    writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+    writeStr(36, 'data'); view.setUint32(40, dataSize, true);
+    var bytes = new Uint8Array(ab), bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return 'data:audio/wav;base64,' + btoa(bin);
+  })();
   function unlockAudio() {
     try {
       if (!timer.audioCtx) {
@@ -1518,6 +1692,88 @@
         if (AC) timer.audioCtx = new AC();
       }
       if (timer.audioCtx && timer.audioCtx.state === 'suspended') timer.audioCtx.resume();
+    } catch (e) { /* noop */ }
+    if (!timer.audioElUnlocked) {
+      try {
+        var el = $('#timerAlarmAudio');
+        if (el) {
+          el.src = SILENT_WAV_URL;
+          var finish = function () { try { el.pause(); el.currentTime = 0; } catch (e2) { /* noop */ } };
+          var p = el.play();
+          if (p && p.then) p.then(finish).catch(finish); else finish();
+          timer.audioElUnlocked = true;
+        }
+      } catch (e) { /* noop */ }
+    }
+    prerenderAlarm(timerSettings.sound);
+  }
+
+  /* AudioBuffer(モノラル前提) → 16bit PCM WAVのBlobにエンコード */
+  function audioBufferToWavBlob(buffer) {
+    var numCh = buffer.numberOfChannels, len = buffer.length, sampleRate = buffer.sampleRate;
+    var blockAlign = numCh * 2, dataSize = len * blockAlign;
+    var ab = new ArrayBuffer(44 + dataSize);
+    var view = new DataView(ab);
+    function writeStr(off, s) { for (var i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); }
+    writeStr(0, 'RIFF'); view.setUint32(4, 36 + dataSize, true); writeStr(8, 'WAVE');
+    writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+    view.setUint16(22, numCh, true); view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true); view.setUint16(32, blockAlign, true); view.setUint16(34, 16, true);
+    writeStr(36, 'data'); view.setUint32(40, dataSize, true);
+    var channels = [];
+    for (var c = 0; c < numCh; c++) channels.push(buffer.getChannelData(c));
+    var offset = 44;
+    for (var i = 0; i < len; i++) {
+      for (var c2 = 0; c2 < numCh; c2++) {
+        var s = Math.max(-1, Math.min(1, channels[c2][i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        offset += 2;
+      }
+    }
+    return new Blob([ab], { type: 'audio/wav' });
+  }
+
+  /* 各音色パターンの再生時間（レンダリング用バッファ長。余裕を持たせた固定値） */
+  function patternDuration(key, full) {
+    if (key === 'bell') return full ? 6.0 : 1.5;
+    if (key === 'chime') return full ? 6.0 : 1.5;
+    if (key === 'digital') return full ? 5.0 : 1.0;
+    if (key === 'soft') return full ? 5.5 : 1.0;
+    return full ? 5.5 : 1.2; // beep
+  }
+
+  /* 選んだ音色パターンをOfflineAudioContextでレンダリングしAudioBufferを返す */
+  function renderAlarmBuffer(key, full) {
+    var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OAC) return Promise.reject(new Error('OfflineAudioContext not supported'));
+    var dur = patternDuration(key, full);
+    var octx = new OAC(1, Math.max(1, Math.ceil(44100 * dur)), 44100);
+    schedulePattern(octx, key, full);
+    return octx.startRendering();
+  }
+
+  /* 選択中の音色(full版)を非同期で事前レンダリングしてキャッシュしておく
+     （タイマー終了時のplayAlarmSoundで待ち時間なく即再生できるようにするため） */
+  var alarmRenderCache = { key: null, buffer: null };
+  function prerenderAlarm(key) {
+    if (alarmRenderCache.key === key && alarmRenderCache.buffer) return;
+    renderAlarmBuffer(key, true).then(function (buf) {
+      alarmRenderCache = { key: key, buffer: buf };
+    }).catch(function () { /* OfflineAudioContext非対応：再生時に従来方式へフォールバック */ });
+  }
+  /* 事前レンダリングしたバッファを<audio>要素で再生する */
+  function playBufferOnAudioEl(buffer) {
+    try {
+      var el = $('#timerAlarmAudio');
+      if (!el) return;
+      if (timer.alarmBlobUrl) { try { URL.revokeObjectURL(timer.alarmBlobUrl); } catch (e) { /* noop */ } }
+      var url = URL.createObjectURL(audioBufferToWavBlob(buffer));
+      timer.alarmBlobUrl = url;
+      el.muted = false;
+      el.src = url;
+      el.currentTime = 0;
+      var p = el.play();
+      if (p && p.catch) p.catch(function () { /* noop */ });
     } catch (e) { /* noop */ }
   }
   /* 1音分をスケジュール（音色・周波数・長さ・音量を指定） */
@@ -1566,31 +1822,41 @@
       for (i = 0; i < beepCount; i++) scheduleTone(ctx, t0 + i * 0.5, (i % 2 === 0) ? 880 : 988, 0.32, 'sine', 0.4);
     }
   }
-  /* タイマー終了時のアラーム音（設定でオフなら鳴らさない） */
-  function playAlarmSound() {
-    if (!timerSettings.soundOn) return;
+  /* Web Audio API(AudioContext)直接再生へのフォールバック（<audio>要素方式が使えない場合のみ） */
+  function playViaAudioContextFallback(key, full) {
     try {
       var ctx = timer.audioCtx;
       if (!ctx) return;
       if (ctx.state === 'suspended') ctx.resume();
-      stopBeep();
-      schedulePattern(ctx, timerSettings.sound, true);
+      schedulePattern(ctx, key, full);
     } catch (e) { /* noop */ }
+  }
+  /* タイマー終了時のアラーム音（設定でオフなら鳴らさない）。
+     事前レンダリング済みならそれを<audio>要素で即再生、未完了ならその場でレンダリングしてから再生する */
+  function playAlarmSound() {
+    if (!timerSettings.soundOn) return;
+    stopBeep();
+    if (alarmRenderCache.key === timerSettings.sound && alarmRenderCache.buffer) {
+      playBufferOnAudioEl(alarmRenderCache.buffer);
+      return;
+    }
+    renderAlarmBuffer(timerSettings.sound, true).then(playBufferOnAudioEl)
+      .catch(function () { playViaAudioContextFallback(timerSettings.sound, true); });
   }
   /* 設定画面での試聴（短いプレビュー） */
   function previewSound(key) {
     unlockAudio();
-    try {
-      var ctx = timer.audioCtx;
-      if (!ctx) return;
-      if (ctx.state === 'suspended') ctx.resume();
-      stopBeep();
-      schedulePattern(ctx, key, false);
-    } catch (e) { /* noop */ }
+    stopBeep();
+    renderAlarmBuffer(key, false).then(playBufferOnAudioEl)
+      .catch(function () { playViaAudioContextFallback(key, false); });
   }
   function stopBeep() {
     (timer.beepNodes || []).forEach(function (o) { try { o.stop(); o.disconnect(); } catch (e) { /* noop */ } });
     timer.beepNodes = [];
+    try {
+      var el = $('#timerAlarmAudio');
+      if (el) { el.pause(); el.currentTime = 0; }
+    } catch (e) { /* noop */ }
   }
   /* バイブ（対応端末のみ。iPhoneのSafari/PWAは非対応のため無効。設定でオフなら振動しない） */
   function vibrateAlarm() {
@@ -1808,6 +2074,8 @@
     // バックグラウンド復帰時：経過を反映し、必要ならWake Lockを取り直す
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState !== 'visible') return;
+      // タイマーがTIME UP画面のまま残っていても、アプリを開いた時点でバッジは消す
+      clearBadge();
       if (timer.running && !timer.paused && !timer.finished) {
         timer.remaining = (timer.endAt - Date.now()) / 1000;
         if (timer.remaining <= 0) { finishTimer(); }
@@ -1859,6 +2127,7 @@
       saveTimerSettings();
       renderTimerSettings();
       previewSound(timerSettings.sound);
+      prerenderAlarm(timerSettings.sound);
     });
     $('#toggleSoundOn').addEventListener('change', function (e) {
       timerSettings.soundOn = e.target.checked;
@@ -1900,7 +2169,9 @@
   bindExInfo();
   bindDrum();
   bindCtime();
+  bindRepsDrum();
   loadTimerSettings();
   bindTimerSettingsOnce();
+  loadWeightStepSettings();
   renderLog(true);
 })();

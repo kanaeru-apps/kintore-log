@@ -176,6 +176,16 @@
       </div>
 
       <div class="s-section">
+        <h4 class="s-title">記録</h4>
+        <div class="panel-list">
+          <div class="s-row">
+            <div class="s-main"><b>重量の±ボタンの刻み幅</b><small>ドラムロールの目盛りは常に0.25kg刻みです</small></div>
+          </div>
+        </div>
+        <div class="panel-list" id="weightStepList" style="margin-top:10px"></div>
+      </div>
+
+      <div class="s-section">
         <h4 class="s-title">通知</h4>
         <div class="panel-list">
           <button class="s-row s-row-nav" id="openTimerSettingsBtn" type="button">
@@ -204,7 +214,7 @@
 
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレ記録 v0.6.0 — Phase 4</p>
+      <p class="version">筋トレ記録 v0.7.0 — Phase 4</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -343,6 +353,29 @@
     </div>
   </div>
 
+  <!-- 回数ドラムロールピッカー -->
+  <div id="repsBackdrop"></div>
+  <div id="repsSheet" role="dialog" aria-label="回数を選択">
+    <div class="drum-head">
+      <button id="repsCancel" class="drum-cancel">キャンセル</button>
+      <span id="repsTitle" class="drum-title"></span>
+      <button id="repsDone" class="drum-done">完了</button>
+    </div>
+    <div class="drum-hint"><span>▲ 少ない</span><span>多い ▼</span></div>
+    <div class="drum-wrap">
+      <div class="drum-highlight"></div>
+      <span class="drum-unit">回</span>
+      <div class="drum-scroll" id="repsScroll"><div class="drum-list" id="repsList"></div></div>
+    </div>
+    <div class="drum-direct">
+      <label for="repsDirectInput">数字で直接入力</label>
+      <div class="drum-direct-row">
+        <input type="text" id="repsDirectInput" inputmode="numeric" pattern="[0-9]*" placeholder="例: 10">
+        <span class="drum-direct-unit">回</span>
+      </div>
+    </div>
+  </div>
+
   <!-- 有酸素：時間（時・分・秒）ピッカー -->
   <div id="ctimeBackdrop"></div>
   <div id="ctimeSheet" role="dialog" aria-label="時間を選択">
@@ -377,6 +410,7 @@
   </div>
 
   <div id="toast" role="status"></div>
+  <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
 <script src="js/db.js"></script>

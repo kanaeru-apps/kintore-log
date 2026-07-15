@@ -1235,6 +1235,35 @@ button { cursor: pointer; }
 }
 #drumSheet.show { transform: translate(-50%, 0); }
 
+/* 回数ドラムロールピッカーのシート自体（重量ドラムと同じ表示方式） */
+#repsBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  z-index: 58;
+}
+#repsBackdrop.show { opacity: 1; pointer-events: auto; }
+
+#repsSheet {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translate(-50%, 105%);
+  width: 100%;
+  max-width: 480px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 22px 22px 0 0;
+  z-index: 59;
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+}
+#repsSheet.show { transform: translate(-50%, 0); }
+
 /* 有酸素：時間（時/分/秒）ピッカーのシート自体（重量ドラムと同じ表示方式） */
 #ctimeBackdrop {
   position: fixed;
