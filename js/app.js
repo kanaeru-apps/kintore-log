@@ -1263,6 +1263,7 @@
       }).join('') + '</div>' : '');
     }).join('');
     $('#storageInfo').textContent = 'ブラウザ内に保存中 · 約 ' + DB.sizeKB() + ' KB';
+    $('#restoreBackupRow').style.display = hasPreimportBackup() ? '' : 'none';
     renderSyncSection();
     renderWeightStepSettings();
   }
@@ -1436,6 +1437,26 @@
 
     $('#exportCsvBtn').onclick = exportCSV;
 
+    $('#importCsvBtn').onclick = function () {
+      var input = $('#importCsvFile');
+      input.value = ''; // 同じファイルを連続で選んでもchangeが発火するように
+      input.click();
+    };
+    $('#importCsvFile').addEventListener('change', function (e) {
+      var file = e.target.files && e.target.files[0];
+      if (file) importCSVFile(file);
+    });
+    $('#restoreBackupBtn').onclick = function () {
+      if (!confirm('直前のCSV取り込み前の状態に戻します。よろしいですか？')) return;
+      var json = null;
+      try { json = localStorage.getItem(PREIMPORT_BACKUP_KEY); } catch (e) { /* noop */ }
+      if (!json || !DB.restoreStateJSON(json)) { toast('バックアップが見つかりませんでした'); return; }
+      try { localStorage.removeItem(PREIMPORT_BACKUP_KEY); } catch (e) { /* noop */ }
+      renderLog();
+      renderSettings();
+      toast('元に戻しました');
+    };
+
     $('#wipeBtn').onclick = function () {
       if (!confirm('すべての記録・種目データを削除します。よろしいですか？')) return;
       if (!confirm('本当に削除しますか？ この操作は取り消せません。')) return;
@@ -1500,6 +1521,117 @@
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
     toast('CSVを書き出しました');
+  }
+
+  /* ================== CSVインポート ================== */
+  /* ROW_HEADの見出し文字列 → 内部キー。列の並びが変わっていてもヘッダー名で判定する */
+  var IMPORT_KEYS = ['date', 'wd', 'part', 'name', 'equip', 'setNo',
+    'w', 'r', 'vol', 't', 'ts', 'd', 'sp', 'inc', 'cal', 'hr', 'memo'];
+  var IMPORT_HEADER_KEY = ROW_HEAD.reduce(function (m, h, i) { m[h] = IMPORT_KEYS[i]; return m; }, {});
+  var PREIMPORT_BACKUP_KEY = 'kintore_v1_preimport_backup';
+
+  /* CSVテキストを2次元配列にパースする（引用符内のカンマ・改行・""エスケープに対応） */
+  function parseCSV(text) {
+    text = String(text || '').replace(/^﻿/, '');
+    var rows = [], row = [], field = '', inQuotes = false;
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+        } else { field += c; }
+      } else if (c === '"') {
+        inQuotes = true;
+      } else if (c === ',') {
+        row.push(field); field = '';
+      } else if (c === '\r') {
+        /* 改行はこの次の\nで処理する */
+      } else if (c === '\n') {
+        row.push(field); field = ''; rows.push(row); row = [];
+      } else {
+        field += c;
+      }
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return rows.filter(function (r) { return !(r.length === 1 && r[0] === ''); });
+  }
+
+  function numOrEmpty(v) {
+    if (v === '' || v == null) return '';
+    var n = parseFloat(v);
+    return isNaN(n) ? '' : n;
+  }
+
+  /* パース済み行 → 日付ごと・種目ごとにグルーピングする。DB.applyImportにそのまま渡せる形にする */
+  function buildImportData(rows) {
+    if (!rows || rows.length < 2) return { dateOrder: [], byDate: {}, rowCount: 0, error: 'CSVにデータ行がありません' };
+    var keys = rows[0].map(function (h) { return IMPORT_HEADER_KEY[String(h).trim()] || null; });
+    if (keys.indexOf('date') < 0 || keys.indexOf('part') < 0 || keys.indexOf('name') < 0) {
+      return { dateOrder: [], byDate: {}, rowCount: 0, error: 'CSVの形式が正しくありません（日付・部位・種目の列が見つかりません）' };
+    }
+    var byDate = {}, dateOrder = [], rowCount = 0;
+    for (var i = 1; i < rows.length; i++) {
+      var r = rows[i];
+      if (!r || !r.length) continue;
+      var rec = {};
+      keys.forEach(function (k, idx) { if (k) rec[k] = (r[idx] !== undefined) ? r[idx] : ''; });
+      if (!rec.date || !rec.part || !rec.name) continue;
+      rowCount++;
+      if (!byDate[rec.date]) { byDate[rec.date] = { entries: {}, order: [], memo: '' }; dateOrder.push(rec.date); }
+      var dayObj = byDate[rec.date];
+      if (rec.memo) dayObj.memo = rec.memo;
+      var entryKey = rec.part + '||' + rec.name + '||' + (rec.equip || '');
+      if (!dayObj.entries[entryKey]) {
+        dayObj.entries[entryKey] = { part: rec.part, name: rec.name, equip: rec.equip || '', sets: [] };
+        dayObj.order.push(entryKey);
+      }
+      var entryObj = dayObj.entries[entryKey];
+      var setNo = parseInt(rec.setNo, 10);
+      if (!setNo || setNo < 1) setNo = entryObj.sets.length + 1;
+      var setObj = (rec.part === CARDIO_PART)
+        ? { t: numOrEmpty(rec.t), ts: numOrEmpty(rec.ts), d: numOrEmpty(rec.d), sp: numOrEmpty(rec.sp), inc: numOrEmpty(rec.inc), cal: numOrEmpty(rec.cal), hr: numOrEmpty(rec.hr) }
+        : { w: numOrEmpty(rec.w), r: numOrEmpty(rec.r) };
+      entryObj.sets[setNo - 1] = setObj;
+    }
+    return { dateOrder: dateOrder, byDate: byDate, rowCount: rowCount };
+  }
+
+  function hasPreimportBackup() {
+    try { return !!localStorage.getItem(PREIMPORT_BACKUP_KEY); } catch (e) { return false; }
+  }
+
+  function importCSVFile(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var data;
+      try {
+        data = buildImportData(parseCSV(reader.result));
+      } catch (e) {
+        toast('CSVの読み込みに失敗しました');
+        return;
+      }
+      if (data.error) { toast(data.error); return; }
+      if (!data.dateOrder.length) { toast('取り込めるデータが見つかりませんでした'); return; }
+      var ok = confirm(data.dateOrder.length + '日分・' + data.rowCount + '件のデータを読み込みます。\n対象の日の記録は置き換わります。よろしいですか？');
+      if (!ok) return;
+
+      var backupJSON = DB.exportStateJSON();
+      try {
+        DB.applyImport(data.dateOrder, data.byDate);
+      } catch (e) {
+        if (backupJSON) DB.restoreStateJSON(backupJSON);
+        toast('取り込みに失敗したため元に戻しました');
+        return;
+      }
+      if (backupJSON) {
+        try { localStorage.setItem(PREIMPORT_BACKUP_KEY, backupJSON); } catch (e) { /* noop */ }
+      }
+      renderLog();
+      renderSettings();
+      toast(data.dateOrder.length + '日分のデータを取り込みました');
+    };
+    reader.onerror = function () { toast('ファイルの読み込みに失敗しました'); };
+    reader.readAsText(file, 'UTF-8');
   }
 
   /* ================== RM計算機 ================== */

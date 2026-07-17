@@ -203,6 +203,15 @@
             <button class="link" id="exportCsvBtn">書き出す</button>
           </div>
           <div class="s-row">
+            <div class="s-main"><b>CSVインポート</b><small>エクスポートしたCSVから復元（対象の日は置き換わります）</small></div>
+            <button class="link" id="importCsvBtn">読み込む</button>
+          </div>
+          <div class="s-row" id="restoreBackupRow" style="display:none">
+            <div class="s-main"><b>インポート前の状態に戻す</b><small>直前のCSV取り込みを取り消します</small></div>
+            <button class="link danger" id="restoreBackupBtn">元に戻す</button>
+          </div>
+          <input id="importCsvFile" type="file" accept=".csv,text/csv" style="display:none">
+          <div class="s-row">
             <div class="s-main"><b>保存データ量</b><small id="storageInfo"></small></div>
           </div>
           <div class="s-row">

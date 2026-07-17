@@ -156,6 +156,15 @@ var DB = (function () {
     return null;
   }
 
+  /* CSVインポート用：一致する種目が無ければ種目マスタに新規登録する（保存はしない。呼び出し側でまとめてsave） */
+  function resolveExercise(name, part, equip) {
+    var ex = findExercise(name, part, equip || '');
+    if (ex) return ex;
+    ex = { id: uid(), name: name, part: part, equip: equip || '' };
+    state.exercises.push(ex);
+    return ex;
+  }
+
   /* 指定日より前の、同じ種目の直近の記録を返す */
   function prevRecord(exId, beforeDate) {
     var dates = Object.keys(state.workouts).filter(function (d) { return d < beforeDate; }).sort().reverse();
@@ -341,6 +350,41 @@ var DB = (function () {
     clearDirty: function (dates) {
       (dates || []).forEach(function (d) { delete state.dirtyDates[d]; });
       save();
+    },
+
+    /* ---- CSVインポート（app.js側でCSVをパース・日付ごとにグルーピングした結果を受け取り反映する） ---- */
+    /* dateOrder: 対象日付の配列。byDate: { date: { order:[entryKey...], entries:{entryKey:{part,name,equip,sets}}, memo } }
+       日付ごとにその日の記録を丸ごと置き換える（CSVに含まれない日付は無変更）。種目マスタに無い種目は自動登録する。 */
+    applyImport: function (dateOrder, byDate) {
+      dateOrder.forEach(function (date) {
+        var dayData = byDate[date];
+        if (!dayData) return;
+        var w = ensure(date);
+        w.entries = dayData.order.map(function (key) {
+          var d = dayData.entries[key];
+          var ex = resolveExercise(d.name, d.part, d.equip);
+          var sets = d.sets.filter(function (s) { return !!s; }); // 歯抜け（セット番号の飛び）を除去
+          if (!sets.length) sets = [emptySet(d.part)];
+          return { id: uid(), exId: ex.id, name: d.name, part: d.part, equip: d.equip || '', sets: sets };
+        });
+        w.memo = dayData.memo || '';
+        markDirty(date);
+      });
+      save();
+    },
+    /* ---- 取り込み前の自動バックアップ・復元 ---- */
+    exportStateJSON: function () {
+      try { return JSON.stringify(state); } catch (e) { return null; }
+    },
+    restoreStateJSON: function (json) {
+      try {
+        var s = JSON.parse(json);
+        if (!s || !s.exercises || !s.workouts) return false;
+        if (!s.dirtyDates) s.dirtyDates = {};
+        state = s;
+        save();
+        return true;
+      } catch (e) { return false; }
     }
   };
 })();
