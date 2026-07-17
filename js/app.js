@@ -648,6 +648,10 @@
   function renderLog(animate) {
     var d = parseDate(ui.date);
     var pad2 = function (n) { return ('0' + n).slice(-2); };
+    // セット入力などその場での再描画は #entries を丸ごと作り直すため、
+    // 何もしないとスクロール位置が失われて別のカードへ飛んでしまう。
+    // 日付・タブ切り替え時（animate=true）は先頭表示でよいので復元しない。
+    var keepScrollY = animate ? null : window.scrollY;
     // アニメーションは日付切り替え・タブ切り替え時のみ（入力のたびに再生されるとチラつくため）
     $('#entries').classList.toggle('no-anim', !animate);
     $('#eyebrow').textContent = 'TRAINING LOG';
@@ -677,6 +681,9 @@
     } else {
       $('#entries').innerHTML = entries.map(entryHtml).join('');
     }
+
+    // 再描画で失われたスクロール位置を、ペイント前に同期的に復元する
+    if (keepScrollY !== null) window.scrollTo(0, keepScrollY);
   }
 
   function entryHtml(e, i) {

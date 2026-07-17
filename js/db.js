@@ -224,7 +224,19 @@ var DB = (function () {
     },
     renameExercise: function (id, name) {
       var ex = getExercise(id);
-      if (ex) { ex.name = name; save(); }
+      if (!ex) return;
+      ex.name = name;
+      // 各日の記録は登録時点の種目名をスナップショットとして持っているため、
+      // 名称変更時はそれらも合わせて書き換える（削除時は履歴保護のためあえて残す仕様と非対称）
+      Object.keys(state.workouts).forEach(function (date) {
+        var w = state.workouts[date];
+        var changed = false;
+        (w.entries || []).forEach(function (e) {
+          if (e.exId === id && e.name !== name) { e.name = name; changed = true; }
+        });
+        if (changed) markDirty(date);
+      });
+      save();
     },
     updateExercise: function (id, fields) {
       var ex = getExercise(id);
