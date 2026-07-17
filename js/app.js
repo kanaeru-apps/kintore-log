@@ -251,7 +251,7 @@
   }
 
   /* ================== 重量±ボタンの刻み幅（設定で変更可） ================== */
-  var WEIGHT_STEP_OPTIONS = [0.5, 1.25, 2.5];
+  var WEIGHT_STEP_OPTIONS = [0.5, 1.25, 2.5, 5];
   var weightStepSettings = { step: 2.5 }; // 既定値は従来どおり2.5kg
   function loadWeightStepSettings() {
     try {
