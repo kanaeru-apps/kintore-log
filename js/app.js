@@ -291,9 +291,8 @@
     if (drumSelIndex >= 0 && kids[drumSelIndex]) kids[drumSelIndex].classList.remove('sel');
     if (kids[index]) kids[index].classList.add('sel');
     drumSelIndex = index;
-    // 直接入力欄にも反映（入力中（フォーカス中）は上書きしない）
-    var input = $('#drumDirectInput');
-    if (input && document.activeElement !== input) input.value = drumFmt(index * DRUM_STEP);
+    // 直接入力欄には反映しない：値が入っていると消してから打ち直す手間が生じるため、
+    // 入力欄は常に手入力専用の空欄にしておく（確定値はホイール選択が持つ）
   }
 
   function drumIndexFromScroll() {
@@ -317,7 +316,7 @@
 
     $('#drumBackdrop').classList.add('show');
     $('#drumSheet').classList.add('show');
-    $('#drumDirectInput').value = drumFmt(index * DRUM_STEP);
+    $('#drumDirectInput').value = ''; // プリフィルしない（前回開いたときの入力も消す）
 
     drumSelIndex = -1;
     var scroll = $('#drumScroll');
@@ -407,8 +406,7 @@
     if (repsSelIndex >= 0 && kids[repsSelIndex]) kids[repsSelIndex].classList.remove('sel');
     if (kids[index]) kids[index].classList.add('sel');
     repsSelIndex = index;
-    var input = $('#repsDirectInput');
-    if (input && document.activeElement !== input) input.value = String(index);
+    // 直接入力欄には反映しない（重量ドラムと同じく手入力専用の空欄を保つ）
   }
 
   function repsIndexFromScroll() {
@@ -431,7 +429,7 @@
 
     $('#repsBackdrop').classList.add('show');
     $('#repsSheet').classList.add('show');
-    $('#repsDirectInput').value = String(cur);
+    $('#repsDirectInput').value = ''; // プリフィルしない（前回開いたときの入力も消す）
 
     repsSelIndex = -1;
     var scroll = $('#repsScroll');
