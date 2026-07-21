@@ -165,16 +165,21 @@ var DB = (function () {
     return ex;
   }
 
-  /* 指定日より前の、同じ種目の直近の記録を返す */
+  /* 指定日より前の、同じ種目の直近の記録を返す。
+     種目を削除→再登録するとIDが変わり過去記録と切れてしまうため、
+     IDで一致しない記録は記録時スナップショット（名前+部位+器具）でも同一種目とみなす */
   function prevRecord(exId, beforeDate) {
+    var ex = getExercise(exId);
     var dates = Object.keys(state.workouts).filter(function (d) { return d < beforeDate; }).sort().reverse();
     for (var i = 0; i < dates.length; i++) {
       var w = state.workouts[dates[i]];
       var entries = w.entries || [];
       for (var j = 0; j < entries.length; j++) {
-        if (entries[j].exId === exId && entries[j].sets.length) {
-          return { date: dates[i], sets: entries[j].sets };
-        }
+        var e = entries[j];
+        if (!e.sets || !e.sets.length) continue;
+        var same = e.exId === exId ||
+          (ex && e.name === ex.name && e.part === ex.part && (e.equip || '') === (ex.equip || ''));
+        if (same) return { date: dates[i], sets: e.sets };
       }
     }
     return null;
