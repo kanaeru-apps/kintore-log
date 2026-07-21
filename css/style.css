@@ -1391,6 +1391,7 @@ button { cursor: pointer; }
   scroll-snap-type: y mandatory;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; /* ホイールを端まで回してもスクロールを背後のページへ連鎖させない */
   touch-action: pan-y;
   cursor: grab;
 }

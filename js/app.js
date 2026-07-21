@@ -273,6 +273,18 @@
 
   function drumFmt(v) { return (v % 1 === 0) ? String(v) : String(Math.round(v * 100) / 100); }
 
+  /* ピッカー表示中は、ホイールを端まで回したときのスクロール連鎖や
+     直接入力のキーボード表示で背後のページがスクロールしてしまうことがある（特にiOS）。
+     開いた時点の位置を覚えておき、閉じるときにそこへ戻す */
+  var pickerScrollY = 0;
+  function rememberPageScroll() { pickerScrollY = window.scrollY; }
+  function restorePageScroll() {
+    var y = pickerScrollY;
+    window.scrollTo(0, y);
+    // iOSはキーボードが閉じたあとに位置を再調整することがあるため、少し遅れてもう一度戻す
+    setTimeout(function () { window.scrollTo(0, y); }, 250);
+  }
+
   function buildDrumList() {
     if (drumBuilt) return;
     var n = Math.round(DRUM_MAX / DRUM_STEP);
@@ -303,6 +315,7 @@
 
   function openDrum(entryId, idx) {
     buildDrumList();
+    rememberPageScroll();
     drumTarget = { entryId: entryId, idx: idx };
 
     var s = DB.getSet(ui.date, entryId, idx);
@@ -334,8 +347,10 @@
     }
     $('#drumBackdrop').classList.remove('show');
     $('#drumSheet').classList.remove('show');
+    $('#drumDirectInput').blur();
     drumTarget = null;
     if (commit) renderLog();
+    restorePageScroll();
   }
 
   function bindDrum() {
@@ -417,6 +432,7 @@
 
   function openRepsDrum(entryId, idx) {
     buildRepsList();
+    rememberPageScroll();
     repsTarget = { entryId: entryId, idx: idx };
 
     var s = DB.getSet(ui.date, entryId, idx);
@@ -447,8 +463,10 @@
     }
     $('#repsBackdrop').classList.remove('show');
     $('#repsSheet').classList.remove('show');
+    $('#repsDirectInput').blur();
     repsTarget = null;
     if (commit) renderLog();
+    restorePageScroll();
   }
 
   function bindRepsDrum() {
@@ -541,6 +559,7 @@
 
   function openCtime(entryId, idx) {
     ctimeBuildLists();
+    rememberPageScroll();
     ctimeTarget = { entryId: entryId, idx: idx };
 
     var s = DB.getSet(ui.date, entryId, idx);
@@ -581,8 +600,10 @@
     }
     $('#ctimeBackdrop').classList.remove('show');
     $('#ctimeSheet').classList.remove('show');
+    ['#ctimeHInput', '#ctimeMInput', '#ctimeSInput'].forEach(function (id) { $(id).blur(); });
     ctimeTarget = null;
     if (commit) renderLog();
+    restorePageScroll();
   }
 
   function bindCtimeCol(col, max) {
