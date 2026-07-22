@@ -288,12 +288,14 @@ var DB = (function () {
       var w = ensure(date);
       // 種目名・部位・器具は記録時点の値を保持（種目マスタから削除しても履歴が壊れない）
       var entry = { id: uid(), exId: exId, name: ex.name, part: ex.part, equip: ex.equip || '', sets: [] };
-      // 前回の記録があれば全セットを引き継ぐ。無ければ既定の行数を用意する
-      // （筋トレ=3セット、有酸素=1セッション。有酸素は「＋セッション追加」で増やせる）
+      // 前回の記録があれば引き継ぐ。無ければ既定の行数を用意する
+      // 筋トレは前回何セットやっていても上から3セット分だけ引き継ぐ（4セット目以降は「＋セット追加」で）。
+      // 有酸素は前回の全セッションを引き継ぐ（インターバル構成を保つため）
       var minRows = isCardioPart(ex.part) ? 1 : 3;
       var prev = prevRecord(exId, date);
       if (prev) {
-        prev.sets.forEach(function (s) { entry.sets.push(copySet(ex.part, s)); });
+        var carry = isCardioPart(ex.part) ? prev.sets : prev.sets.slice(0, minRows);
+        carry.forEach(function (s) { entry.sets.push(copySet(ex.part, s)); });
       }
       while (entry.sets.length < minRows) {
         var pad = entry.sets.length ? entry.sets[entry.sets.length - 1] : null;
