@@ -695,8 +695,16 @@
     // 種目カード
     var entries = (w && w.entries) || [];
     if (!entries.length) {
-      $('#entries').innerHTML =
+      var emptyHtml =
         '<div class="empty"><div class="ph-icon">' + dumbbellSvg() + '</div><p>まだ記録がありません。<br>「＋ 種目を追加」からはじめましょう。</p></div>';
+      // 端末に記録が1件もない＝機種変更やSafari/アプリの開き分けで別の保存場所を見ている可能性が
+      // あるため、クラウドバックアップからの復元導線を出す
+      if (!DB.datesWithData().length) {
+        emptyHtml += '<div class="empty-restore"><button class="btn ghost small" id="cloudRestoreEmptyBtn" type="button">クラウドバックアップから復元</button></div>';
+      }
+      $('#entries').innerHTML = emptyHtml;
+      var rBtn = $('#cloudRestoreEmptyBtn');
+      if (rBtn) rBtn.onclick = promptCloudRestore;
     } else {
       $('#entries').innerHTML = entries.map(entryHtml).join('');
     }
@@ -1346,44 +1354,136 @@
             '<input id="gasUrlInput" class="sync-url-input" type="text" placeholder="https://script.google.com/macros/s/.../exec" value="' + esc(getGasUrl()) + '">' +
           '</div>' +
           '<div class="s-row">' +
-            '<div class="s-main"><b>最終同期</b><small id="syncStatusText">' + esc(lastText) + '</small></div>' +
+            '<div class="s-main"><b>最終同期</b><small id="syncStatusText">' + esc(lastText) + '・変更は起動時と画面切替時に自動送信</small></div>' +
             '<button class="link" id="syncNowBtn" type="button">今すぐバックアップ</button>' +
+          '</div>' +
+          '<div class="s-row">' +
+            '<div class="s-main"><b>復元</b><small>スプレッドシートの記録と種目をこの端末へ取り込む</small></div>' +
+            '<button class="link" id="restoreCloudBtn" type="button">スプレッドシートから復元</button>' +
           '</div>' +
         '</div>' +
       '</div>';
   }
 
-  function runSync() {
+  /* バックアップに毎回同梱する全種目リスト（「種目」シートに丸ごと保存される） */
+  function collectExerciseRows() {
+    return DB.getExercises().map(function (x) {
+      return [x.part, x.name, x.equip || '', x.video || '', x.note || ''];
+    });
+  }
+
+  var syncInFlight = false; // 起動時の自動送信・画面切替時・手動ボタンの二重送信を防ぐ
+
+  function runSync(opts) {
+    opts = opts || {};
     var url = getGasUrl();
-    if (!url) { toast('GAS Web AppのURLを入力してください'); return; }
+    if (!url) { if (!opts.auto) toast('GAS Web AppのURLを入力してください'); return; }
     var dates = DB.dirtyDates();
-    if (!dates.length) { toast('変更はありません'); return; }
-    var payload = { dates: dates, rows: [] };
+    if (!dates.length) { if (!opts.auto) toast('変更はありません'); return; }
+    if (syncInFlight) return;
+    syncInFlight = true;
+    var payload = { dates: dates, rows: [], exercises: collectExerciseRows() };
     dates.forEach(function (date) {
       rowsForDate(date).forEach(function (row) { payload.rows.push(row); });
     });
     var btn = $('#syncNowBtn');
-    if (btn) { btn.disabled = true; btn.textContent = '送信中…'; }
+    if (btn && !opts.auto) { btn.disabled = true; btn.textContent = '送信中…'; }
     fetch(url, {
       method: 'POST',
       // GASのWeb Appはプリフライト(OPTIONS)に応答しないため、text/plainで送りCORSプリフライトを回避する
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      // 画面切替時の自動送信はページが隠れた後も送信を続行させる（keepaliveはボディ64KB制限
+      // があるため常用せず、差分が小さいこのケースに限って付ける）
+      keepalive: !!opts.keepalive
     })
       .then(function (res) { return res.json().catch(function () { return { ok: true }; }); })
       .then(function (json) {
         if (json && json.ok === false) throw new Error(json.error || 'sync failed');
         DB.clearDirty(dates);
         setLastSync(new Date().toISOString());
-        toast('バックアップが完了しました（' + dates.length + '日分）');
+        if (!opts.auto) toast('バックアップが完了しました（' + dates.length + '日分）');
       })
       .catch(function () {
-        toast('バックアップに失敗しました。URLや通信環境を確認してください');
+        // 失敗時はdirtyが残るため、次の起動時・画面切替時・手動バックアップで自動的に再送される
+        if (!opts.auto) toast('バックアップに失敗しました。URLや通信環境を確認してください');
       })
       .then(function () {
-        if (btn) { btn.disabled = false; btn.textContent = '今すぐバックアップ'; }
+        syncInFlight = false;
+        if (btn && !opts.auto) { btn.disabled = false; btn.textContent = '今すぐバックアップ'; }
         renderSyncSection();
       });
+  }
+
+  /* 未送信の変更があれば静かにバックアップする（URL未設定・失敗時は何もしない） */
+  function autoSync(opts) {
+    if (!getGasUrl()) return;
+    if (!DB.dirtyDates().length) return;
+    runSync({ auto: true, keepalive: !!(opts && opts.keepalive) });
+  }
+
+  /* スプレッドシートから全記録＋種目リストを取り込む */
+  function restoreFromCloud() {
+    var url = getGasUrl();
+    if (!url) { toast('GAS Web AppのURLを入力してください'); return; }
+    var btn = $('#restoreCloudBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '読み込み中…'; }
+    var done = function () {
+      if (btn) { btn.disabled = false; btn.textContent = 'スプレッドシートから復元'; }
+    };
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'restore' })
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (json) {
+        if (!json || json.ok === false) throw new Error((json && json.error) || 'restore failed');
+        var rows = json.rows || [];
+        if (!rows.length) { toast('スプレッドシートに記録がありません'); done(); return; }
+        // 記録行はCSVインポートと同じ17列形式なので、ヘッダー行を先頭に足して取り込み処理を流用する
+        var data = buildImportData([ROW_HEAD].concat(rows));
+        if (data.error) { toast(data.error); done(); return; }
+        if (!data.dateOrder.length) { toast('取り込めるデータが見つかりませんでした'); done(); return; }
+        var ok = confirm('クラウドバックアップから ' + data.dateOrder.length + '日分・' + data.rowCount + '件を復元します。\n対象の日の記録は置き換わります。よろしいですか？');
+        if (!ok) { done(); return; }
+        var backupJSON = DB.exportStateJSON();
+        try {
+          DB.applyImport(data.dateOrder, data.byDate);
+          DB.importExercises((json.exercises || []).map(function (r) {
+            return { part: String(r[0] || ''), name: String(r[1] || ''), equip: String(r[2] || ''), video: String(r[3] || ''), note: String(r[4] || '') };
+          }));
+        } catch (e) {
+          if (backupJSON) DB.restoreStateJSON(backupJSON);
+          toast('復元に失敗したため元に戻しました');
+          done();
+          return;
+        }
+        if (backupJSON) {
+          try { localStorage.setItem(PREIMPORT_BACKUP_KEY, backupJSON); } catch (e) { /* noop */ }
+        }
+        DB.clearDirty(data.dateOrder); // スプシ由来のデータはスプシと一致しているため再送不要
+        setLastSync(new Date().toISOString());
+        renderLog();
+        renderSettings();
+        toast(data.dateOrder.length + '日分の記録を復元しました');
+        done();
+      })
+      .catch(function () {
+        toast('復元に失敗しました。URLや通信環境を確認してください');
+        done();
+      });
+  }
+
+  /* 記録が空の端末からの復元導線（記録タブの空状態から。隠し機能の解除状態と独立して使える） */
+  function promptCloudRestore() {
+    if (!getGasUrl()) {
+      var url = prompt('バックアップ用 GAS Web AppのURLを入力してください\n（https://script.google.com/macros/s/…/exec）');
+      if (!url || !url.trim()) return;
+      setGasUrl(url.trim());
+      renderSyncSection();
+    }
+    restoreFromCloud();
   }
 
   function bindSettings() {
@@ -1395,6 +1495,7 @@
     });
     $('#syncSectionContainer').addEventListener('click', function (e) {
       if (e.target.id === 'syncNowBtn') runSync();
+      if (e.target.id === 'restoreCloudBtn') restoreFromCloud();
     });
 
     $('#weightStepList').addEventListener('click', function (e) {
@@ -2332,4 +2433,11 @@
   bindTimerSettingsOnce();
   loadWeightStepSettings();
   renderLog(true);
+
+  // 自動バックアップ：起動直後（描画を妨げないよう少し遅らせる）と、
+  // アプリを閉じる・他アプリへ切り替えるとき（hidden）に未送信の変更を送る
+  setTimeout(function () { autoSync(); }, 2000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') autoSync({ keepalive: true });
+  });
 })();

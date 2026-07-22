@@ -377,6 +377,22 @@ var DB = (function () {
       });
       save();
     },
+    /* クラウド復元用：種目リストを取り込む。名前+部位+器具が一致する既存種目はそのまま使い、
+       無いものだけ追加する。video/noteはローカルが空の場合のみ設定（ローカルの編集を上書きしない） */
+    importExercises: function (list) {
+      (list || []).forEach(function (d) {
+        if (!d || !d.name || !d.part) return;
+        var ex = findExercise(d.name, d.part, d.equip || '');
+        if (!ex) {
+          ex = { id: uid(), name: d.name, part: d.part, equip: d.equip || '' };
+          state.exercises.push(ex);
+        }
+        if (d.video && !ex.video) ex.video = d.video;
+        if (d.note && !ex.note) ex.note = d.note;
+      });
+      save();
+    },
+
     /* ---- 取り込み前の自動バックアップ・復元 ---- */
     exportStateJSON: function () {
       try { return JSON.stringify(state); } catch (e) { return null; }
