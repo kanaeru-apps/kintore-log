@@ -1342,7 +1342,10 @@
     var pending = DB.dirtyDates().length;
     var last = getLastSync();
     var lastText = last ? new Date(last).toLocaleString('ja-JP') : '未同期';
-    if (pending) lastText += '（未送信 ' + pending + '件）';
+    var pendingParts = [];
+    if (pending) pendingParts.push(pending + '件');
+    if (DB.exercisesDirty()) pendingParts.push('種目リスト');
+    if (pendingParts.length) lastText += '（未送信 ' + pendingParts.join('・') + '）';
     box.innerHTML =
       '<div class="s-section">' +
         '<h4 class="s-title">クラウド同期</h4>' +
@@ -1379,15 +1382,22 @@
     var url = getGasUrl();
     if (!url) { if (!opts.auto) toast('GAS Web AppのURLを入力してください'); return; }
     var dates = DB.dirtyDates();
+    var exOnly = false;
     if (!dates.length) {
-      if (opts.auto) return;
-      // 手動時：未送信の変更が無くても全記録の送り直しを提案する。
-      // 過去に誤ったURL宛の送信を成功扱いにしてしまった等で「送信済み扱いなのに
-      // スプレッドシートに届いていない」状態から回復するための手段
-      var all = DB.datesWithData();
-      if (!all.length) { toast('送信する記録がありません'); return; }
-      if (!confirm('未送信の変更はありません。\n全記録（' + all.length + '日分）をスプレッドシートへ送り直しますか？')) return;
-      dates = all;
+      if (DB.exercisesDirty()) {
+        // 種目マスタだけが変更されている：記録行なしで種目リストのみ送る
+        exOnly = true;
+      } else if (opts.auto) {
+        return;
+      } else {
+        // 手動時：未送信の変更が無くても全記録の送り直しを提案する。
+        // 過去に誤ったURL宛の送信を成功扱いにしてしまった等で「送信済み扱いなのに
+        // スプレッドシートに届いていない」状態から回復するための手段
+        var all = DB.datesWithData();
+        if (!all.length) { toast('送信する記録がありません'); return; }
+        if (!confirm('未送信の変更はありません。\n全記録（' + all.length + '日分）をスプレッドシートへ送り直しますか？')) return;
+        dates = all;
+      }
     }
     if (syncInFlight) return;
     syncInFlight = true;
@@ -1416,8 +1426,9 @@
       .then(function (json) {
         if (json && json.ok === false) throw new Error(json.error || 'sync failed');
         DB.clearDirty(dates);
+        DB.clearExercisesDirty();
         setLastSync(new Date().toISOString());
-        if (!opts.auto) toast('バックアップが完了しました（' + dates.length + '日分）');
+        if (!opts.auto) toast(exOnly ? '種目リストをバックアップしました' : 'バックアップが完了しました（' + dates.length + '日分）');
       })
       .catch(function () {
         // 失敗時はdirtyが残るため、次の起動時・画面切替時・手動バックアップで自動的に再送される
@@ -1430,10 +1441,10 @@
       });
   }
 
-  /* 未送信の変更があれば静かにバックアップする（URL未設定・失敗時は何もしない） */
+  /* 未送信の変更（記録または種目リスト）があれば静かにバックアップする（URL未設定・失敗時は何もしない） */
   function autoSync(opts) {
     if (!getGasUrl()) return;
-    if (!DB.dirtyDates().length) return;
+    if (!DB.dirtyDates().length && !DB.exercisesDirty()) return;
     runSync({ auto: true, keepalive: !!(opts && opts.keepalive) });
   }
 

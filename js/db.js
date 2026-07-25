@@ -69,6 +69,8 @@ var DB = (function () {
 
   /* スプレッドシート同期用：前回同期以降に変更された日付を記憶する（クラウド連携機能で使用） */
   function markDirty(date) { state.dirtyDates[date] = true; }
+  /* 種目マスタの変更（追加・名称変更・情報更新・削除・並べ替え）も未送信変更として記憶する */
+  function markExercisesDirty() { state.dirtyExercises = true; }
 
   /* 既存データを新しいデータ構造に引き上げる */
   function migrate() {
@@ -103,6 +105,11 @@ var DB = (function () {
             datesWithData().forEach(function (d) { state.dirtyDates[d] = true; });
             save();
           }
+          if (state.dirtyExercises === undefined) {
+            // 種目dirty追跡の導入前からのデータ：初回同期で種目リストを確実に送れるようdirty扱いにする
+            state.dirtyExercises = true;
+            save();
+          }
           return;
         }
       }
@@ -111,7 +118,8 @@ var DB = (function () {
       version: 2,
       exercises: DEFAULTS.map(function (d, i) { return { id: 'd' + i, name: d[0], part: d[1], equip: d[2] }; }),
       workouts: {},
-      dirtyDates: {}
+      dirtyDates: {},
+      dirtyExercises: true
     };
     save();
   }
@@ -162,6 +170,7 @@ var DB = (function () {
     if (ex) return ex;
     ex = { id: uid(), name: name, part: part, equip: equip || '' };
     state.exercises.push(ex);
+    markExercisesDirty();
     return ex;
   }
 
@@ -233,6 +242,7 @@ var DB = (function () {
     addExercise: function (name, part, equip) {
       var ex = { id: uid(), name: name, part: part, equip: equip || '' };
       state.exercises.push(ex);
+      markExercisesDirty();
       save();
       return ex;
     },
@@ -250,12 +260,14 @@ var DB = (function () {
         });
         if (changed) markDirty(date);
       });
+      markExercisesDirty();
       save();
     },
     updateExercise: function (id, fields) {
       var ex = getExercise(id);
       if (!ex) return;
       Object.keys(fields).forEach(function (k) { ex[k] = fields[k]; });
+      markExercisesDirty();
       save();
     },
     /* 指定部位の種目を orderedIds の順に並べ替える（他部位の位置は保持） */
@@ -272,10 +284,12 @@ var DB = (function () {
       state.exercises = state.exercises.map(function (x) {
         return x.part === part ? partItems[k++] : x;
       });
+      markExercisesDirty();
       save();
     },
     deleteExercise: function (id) {
       state.exercises = state.exercises.filter(function (x) { return x.id !== id; });
+      markExercisesDirty();
       save();
     },
 
@@ -358,6 +372,8 @@ var DB = (function () {
       (dates || []).forEach(function (d) { delete state.dirtyDates[d]; });
       save();
     },
+    exercisesDirty: function () { return !!state.dirtyExercises; },
+    clearExercisesDirty: function () { state.dirtyExercises = false; save(); },
 
     /* ---- CSVインポート（app.js側でCSVをパース・日付ごとにグルーピングした結果を受け取り反映する） ---- */
     /* dateOrder: 対象日付の配列。byDate: { date: { order:[entryKey...], entries:{entryKey:{part,name,equip,sets}}, memo } }
