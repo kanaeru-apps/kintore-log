@@ -1379,7 +1379,16 @@
     var url = getGasUrl();
     if (!url) { if (!opts.auto) toast('GAS Web AppのURLを入力してください'); return; }
     var dates = DB.dirtyDates();
-    if (!dates.length) { if (!opts.auto) toast('変更はありません'); return; }
+    if (!dates.length) {
+      if (opts.auto) return;
+      // 手動時：未送信の変更が無くても全記録の送り直しを提案する。
+      // 過去に誤ったURL宛の送信を成功扱いにしてしまった等で「送信済み扱いなのに
+      // スプレッドシートに届いていない」状態から回復するための手段
+      var all = DB.datesWithData();
+      if (!all.length) { toast('送信する記録がありません'); return; }
+      if (!confirm('未送信の変更はありません。\n全記録（' + all.length + '日分）をスプレッドシートへ送り直しますか？')) return;
+      dates = all;
+    }
     if (syncInFlight) return;
     syncInFlight = true;
     var payload = { dates: dates, rows: [], exercises: collectExerciseRows() };
@@ -1397,7 +1406,13 @@
       // があるため常用せず、差分が小さいこのケースに限って付ける）
       keepalive: !!opts.keepalive
     })
-      .then(function (res) { return res.json().catch(function () { return { ok: true }; }); })
+      // JSONを返さない応答（誤ったURL宛など）を成功扱いにしない。
+      // 以前は json() 失敗時に {ok:true} へフォールバックしていたため、届いていないのに
+      // 「送信済み」となり以後の再送が行われなくなる不具合があった
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
       .then(function (json) {
         if (json && json.ok === false) throw new Error(json.error || 'sync failed');
         DB.clearDirty(dates);
@@ -1491,7 +1506,14 @@
     if (versionEl) versionEl.addEventListener('click', onVersionTap);
 
     $('#syncSectionContainer').addEventListener('change', function (e) {
-      if (e.target.id === 'gasUrlInput') setGasUrl(e.target.value.trim());
+      if (e.target.id === 'gasUrlInput') {
+        var v = e.target.value.trim();
+        setGasUrl(v);
+        // スプレッドシート閲覧用URL等の貼り間違いに気づけるようにする
+        if (v && v.indexOf('https://script.google.com/') !== 0) {
+          toast('注意：バックアップ用URLは https://script.google.com/… で始まります');
+        }
+      }
     });
     $('#syncSectionContainer').addEventListener('click', function (e) {
       if (e.target.id === 'syncNowBtn') runSync();
