@@ -1395,7 +1395,7 @@
         // スプレッドシートに届いていない」状態から回復するための手段
         var all = DB.datesWithData();
         if (!all.length) { toast('送信する記録がありません'); return; }
-        if (!confirm('未送信の変更はありません。\n全記録（' + all.length + '日分）をスプレッドシートへ送り直しますか？')) return;
+        if (!confirm('✅ すべてバックアップ済みです（未送信の変更はありません）。\n念のため全記録（' + all.length + '日分）を送り直す場合はOKを押してください。')) return;
         dates = all;
       }
     }

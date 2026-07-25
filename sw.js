@@ -1,5 +1,5 @@
 /* 筋トレ記録 Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v32';
+const CACHE = 'kintore-v33';
 const ASSETS = [
   './',
   './index.html',
@@ -42,6 +42,7 @@ self.addEventListener('fetch', (e) => {
         }
         return res;
       })
-      .catch(() => caches.match(req).then((hit) => hit || caches.match('./index.html')))
+      // ignoreSearch: アセットURLの ?v= バージョンクエリが変わってもオフライン時にキャッシュへフォールバックできるように
+      .catch(() => caches.match(req, { ignoreSearch: true }).then((hit) => hit || caches.match('./index.html')))
   );
 });
