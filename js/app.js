@@ -1507,7 +1507,7 @@
      受付専用GAS（gas/feedback.gs）に送信する。バックアップ用GASとは別物で、
      このURLは公開前提の受付窓口のためコードに直接埋め込む（書き込み専用・記録データとは無関係）。
      空文字の間はサポートセクション自体を表示しない */
-  var FEEDBACK_GAS_URL = '';
+  var FEEDBACK_GAS_URL = 'https://script.google.com/macros/s/AKfycbzIuw4o_FtZbpoR3iRoFbqwNJPKU9V41hNXxw6u98Pfavmt3B7atETA2Fcju9jUjlnL2Q/exec';
   var FB_LIMIT_PER_DAY = 5;
 
   function appVersion() {
