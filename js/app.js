@@ -698,8 +698,10 @@
       var emptyHtml =
         '<div class="empty"><div class="ph-icon">' + dumbbellSvg() + '</div><p>まだ記録がありません。<br>「＋ 種目を追加」からはじめましょう。</p></div>';
       // 端末に記録が1件もない＝機種変更やSafari/アプリの開き分けで別の保存場所を見ている可能性が
-      // あるため、クラウドバックアップからの復元導線を出す
-      if (!DB.datesWithData().length) {
+      // あるため、クラウドバックアップからの復元導線を出す。
+      // ただしクラウド同期を使っている端末（解除済みまたはURL設定済み）に限る：
+      // 一般公開後の新規ユーザーには意味が分からないボタンのため見せない
+      if (!DB.datesWithData().length && (syncUnlocked() || getGasUrl())) {
         emptyHtml += '<div class="empty-restore"><button class="btn ghost small" id="cloudRestoreEmptyBtn" type="button">クラウドバックアップから復元</button></div>';
       }
       $('#entries').innerHTML = emptyHtml;
@@ -1499,6 +1501,64 @@
         toast('復元に失敗しました。URLや通信環境を確認してください');
         done();
       });
+  }
+
+  /* ================== ご意見・ご要望（一般公開向けサポート窓口） ==================
+     受付専用GAS（gas/feedback.gs）に送信する。バックアップ用GASとは別物で、
+     このURLは公開前提の受付窓口のためコードに直接埋め込む（書き込み専用・記録データとは無関係）。
+     空文字の間はサポートセクション自体を表示しない */
+  var FEEDBACK_GAS_URL = '';
+  var FB_LIMIT_PER_DAY = 5;
+
+  function appVersion() {
+    var el = $('.version');
+    var m = el && el.textContent.match(/v[\d.]+/);
+    return m ? m[0] : '';
+  }
+
+  function bindFeedback() {
+    var section = $('#supportSection');
+    if (!section) return;
+    if (!FEEDBACK_GAS_URL) { section.style.display = 'none'; return; }
+
+    $('#fbSendBtn').onclick = function () {
+      var text = $('#fbText').value.trim();
+      if (!text) { toast('内容を入力してください'); return; }
+      var countKey = 'kintore_fb_' + DB.todayStr();
+      var count = 0;
+      try { count = parseInt(localStorage.getItem(countKey), 10) || 0; } catch (e) { /* noop */ }
+      if (count >= FB_LIMIT_PER_DAY) { toast('本日の送信回数の上限に達しました。また明日お願いします'); return; }
+      var btn = $('#fbSendBtn');
+      btn.disabled = true;
+      btn.textContent = '送信中…';
+      fetch(FEEDBACK_GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          text: text.slice(0, 1000),
+          email: $('#fbEmail').value.trim().slice(0, 200),
+          version: appVersion()
+        })
+      })
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function (json) {
+          if (json && json.ok === false) throw new Error(json.error || 'failed');
+          try { localStorage.setItem(countKey, String(count + 1)); } catch (e) { /* noop */ }
+          $('#fbText').value = '';
+          $('#fbEmail').value = '';
+          toast('ご意見ありがとうございました！今後の改善の参考にさせていただきます。');
+        })
+        .catch(function () {
+          toast('送信に失敗しました。通信環境をご確認のうえ、時間をおいてお試しください');
+        })
+        .then(function () {
+          btn.disabled = false;
+          btn.textContent = '送信する';
+        });
+    };
   }
 
   /* 記録が空の端末からの復元導線（記録タブの空状態から。隠し機能の解除状態と独立して使える） */
@@ -2458,6 +2518,7 @@
   bindSheet();
   bindHistory();
   bindSettings();
+  bindFeedback();
   bindExInfo();
   bindDrum();
   bindCtime();

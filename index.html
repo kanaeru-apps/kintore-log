@@ -17,7 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.8.4">
+<link rel="stylesheet" href="css/style.css?v=0.9.0">
 </head>
 <body>
 <div id="app">
@@ -223,9 +223,35 @@
         </div>
       </div>
 
+      <!-- サポート：ご意見・ご要望フォーム（受付用GAS URL未設定のビルドでは app.js が非表示にする） -->
+      <div class="s-section" id="supportSection">
+        <h4 class="s-title">サポート</h4>
+        <div class="panel-list">
+          <div class="s-row">
+            <div class="s-main"><b>ご意見・ご要望</b><small>不具合のご報告や改善のご要望をお送りください</small></div>
+          </div>
+          <div class="s-row fb-col">
+            <textarea id="fbText" maxlength="1000" rows="4" placeholder="アプリの改善に活用させていただきます。お気軽にどうぞ"></textarea>
+            <label class="fb-label" for="fbEmail">メールアドレス（任意・空欄OK)</label>
+            <input id="fbEmail" class="sync-url-input" type="text" inputmode="email" maxlength="200" placeholder="example@email.com" autocomplete="email">
+            <p class="fb-note">内容についてこちらからご連絡することがあります。</p>
+            <button id="fbSendBtn" class="btn primary small" type="button">送信する</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="s-section">
+        <h4 class="s-title">プライバシー</h4>
+        <div class="panel-list">
+          <div class="s-row">
+            <div class="s-main"><small>記録・種目などのデータはすべてお使いの端末の中に保存されます。開発者があなたの記録を見ることはできません。</small></div>
+          </div>
+        </div>
+      </div>
+
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレ記録 v0.8.4 — Phase 5</p>
+      <p class="version">筋トレ記録 v0.9.0 — Phase 6</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -424,9 +450,9 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.8.4"></script>
-<script src="js/app.js?v=0.8.4"></script>
-<script src="js/charts.js?v=0.8.4"></script>
+<script src="js/db.js?v=0.9.0"></script>
+<script src="js/app.js?v=0.9.0"></script>
+<script src="js/charts.js?v=0.9.0"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});
