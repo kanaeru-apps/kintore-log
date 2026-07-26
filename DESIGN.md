@@ -14,6 +14,7 @@ iPhoneで使う筋トレ記録アプリ。**PWA（Webアプリ）方式**で完�
 | 項目 | 決定 | 理由 |
 |---|---|---|
 | 公開方法 | GitHub Pages（無料） | リポジトリはpublicになる |
+| 公開先URL | https://kanaeru-apps.github.io/kintore-log/ （リポジトリ `kanaeru-apps/kintore-log`） | 2026-07-26に個人アカウントから組織アカウントへ移設。URL・コミット履歴から開発者の実名が見えないようにするため（下記 Phase 7-0） |
 | データ保存 | 端末内（localStorage）＋ Googleスプレッドシート二重保存 | Phase 4でGAS連携 |
 | ローカルDB | localStorage（抽象化レイヤー js/db.js 経由） | 記録データは軽量（数年分でも数百KB）。file://でも動作し確実。将来IndexedDBへ移行可能な構造 |
 | GAS URLの扱い | **コードに埋め込まない**。アプリ内設定画面で入力し端末内にのみ保存 | publicリポジトリに秘密情報を置かないため |
@@ -183,6 +184,13 @@ iPhoneで使う筋トレ記録アプリ。**PWA（Webアプリ）方式**で完�
   - **受付GAS URLの扱い**：公開前提の受付窓口のため`FEEDBACK_GAS_URL`定数としてコードに直接埋め込む（バックアップ用GASの「埋め込まない」方針とは別物：書き込み専用で記録データとは無関係）。**空文字の間はサポートセクション自体が非表示**（ユーザーのGASデプロイ後にURLを埋めて有効化する）
   - **一般公開向け整理**：記録0件時の「クラウドバックアップから復元」ボタンを、クラウド同期を使っている端末（隠し機能解除済みまたはGAS URL設定済み）だけに表示。設定画面に「プライバシー」セクション（データは端末内保存・開発者は記録を見られない旨）を追加
   - 通知メール宛先は`NOTIFY_EMAIL`定数（空ならスプレッドシートのオーナー宛）
+- [x] **Phase 7-0：公開URL・コミット履歴の匿名化（2026-07-26 実施）**
+  - **背景**：App Store公開を見据え、公開物から開発者の実名を外したい。実名が露出していた箇所は (1)GitHub PagesのURL（`chihirohonma.github.io`）、(2)リポジトリのオーナー名、(3)全40コミットの作者名とメールアドレス の3つ
+  - **実施内容**：`git filter-repo --mailmap` で全コミットの author/committer を `kanaeru-apps <kanaeru-apps@users.noreply.github.com>` に書き換え、組織アカウント `kanaeru-apps` に**新規リポジトリを作って通常pushした**（既存リポジトリへのforce pushではない）
+  - **なぜ移管(transfer)ではなく新規作成か**：force pushだと書き換え前の古いコミットがGitHub側に到達可能なオブジェクトとして残り、コミットSHAを直接指定すれば実名・メールが読めてしまう。新規リポジトリなら書き換え後の履歴しか存在せず、旧URLからのリダイレクト（＝個人アカウントとの紐付け）も発生しない。star/fork/issueはいずれも0件で失うものが無かった
+  - **ローカル設定**：このリポジトリ限定で `git config user.name/user.email` を `kanaeru-apps` に設定済み（他プロジェクトのコミットには影響しない）。今後このリポジトリでコミットする際に実名が再混入することはない
+  - **旧リポジトリ**：`ChihiroHonma/kintore-log` は移行確認後に非公開化する（公開したままだと実名入りの履歴が残るため）
+  - **PWAへの影響**：オリジンが変わるためlocalStorageは引き継がれない。`manifest.json`は`start_url`/`scope`とも相対パス（`./`）のため変更不要。移行手順は「新URLをホーム画面に追加 → 設定でGAS URLを入力 → スプレッドシートから復元」
 
 ## ファイル構成
 
@@ -247,6 +255,7 @@ iPhoneで使う筋トレ記録アプリ。**PWA（Webアプリ）方式**で完�
 
 ## 次のアクション
 
-1. ユーザーがローカルでUI確認 → 修正イテレーション
-2. UI確定後：GitHubリポジトリ作成 → GitHub Pages公開 → iPhone実機確認
+1. iPhoneを新URL（https://kanaeru-apps.github.io/kintore-log/）へ移行：ホーム画面に追加 → 設定でGAS URLを入力 → 「スプレッドシートから復元」
+2. 移行確認後、旧リポジトリ `ChihiroHonma/kintore-log` を非公開化
+3. **Phase 7：App Store公開**（アプリ名は未決定）。Capacitorでラップし、`ツール_無音カメラ` で構築済みのCodemagic（Windows環境からiOSビルド）構成を流用する。販売者名は個人名義のまま（本名表示を許容と決定済み）
 3. Phase 2 以降へ
