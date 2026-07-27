@@ -1322,6 +1322,25 @@
   function getLastSync() { try { return localStorage.getItem(LAST_SYNC_KEY) || ''; } catch (e) { return ''; } }
   function setLastSync(iso) { try { localStorage.setItem(LAST_SYNC_KEY, iso); } catch (e) { /* noop */ } }
 
+  /* GAS Web AppのURLかどうかを判定する唯一の窓口。
+     スプレッドシートの閲覧URL（docs.google.com/…）を貼る取り違えが繰り返し起きたため、
+     入力箇所ごとに判定を書かず必ずここを通し、不正なURLはそもそも保存させない。
+     戻り値: { ok: true, url } または { ok: false, error: 表示メッセージ } */
+  function checkGasUrl(input) {
+    var v = String(input || '').trim();
+    if (!v) return { ok: false, error: 'URLが入力されていません。' };
+    if (v.indexOf('docs.google.com') >= 0) {
+      return { ok: false, error: 'それはスプレッドシートを開くためのURLです。\n\n必要なのは Apps Script を「ウェブアプリとしてデプロイ」したときに発行される、\nhttps://script.google.com/macros/s/…/exec\nという形式のURLです。' };
+    }
+    if (v.indexOf('https://script.google.com/') !== 0) {
+      return { ok: false, error: 'バックアップ用のURLは https://script.google.com/ で始まります。\n入力されたURLは形式が違うようです。' };
+    }
+    if (v.slice(-5) !== '/exec') {
+      return { ok: false, error: 'URLの末尾が /exec になっているか確認してください。\n（/dev で終わるURLは開発用のため使えません）' };
+    }
+    return { ok: true, url: v };
+  }
+
   var versionTapCount = 0;
   var versionTapTimer = null;
   function onVersionTap() {
@@ -1564,9 +1583,11 @@
   /* 記録が空の端末からの復元導線（記録タブの空状態から。隠し機能の解除状態と独立して使える） */
   function promptCloudRestore() {
     if (!getGasUrl()) {
-      var url = prompt('バックアップ用 GAS Web AppのURLを入力してください\n（https://script.google.com/macros/s/…/exec）');
-      if (!url || !url.trim()) return;
-      setGasUrl(url.trim());
+      var url = prompt('バックアップ用 GAS Web AppのURLを入力してください\n（https://script.google.com/macros/s/…/exec）\n※スプレッドシートを開くURLではありません');
+      if (url === null) return;
+      var chk = checkGasUrl(url);
+      if (!chk.ok) { alert(chk.error); return; }
+      setGasUrl(chk.url);
       renderSyncSection();
     }
     restoreFromCloud();
@@ -1579,11 +1600,18 @@
     $('#syncSectionContainer').addEventListener('change', function (e) {
       if (e.target.id === 'gasUrlInput') {
         var v = e.target.value.trim();
-        setGasUrl(v);
-        // スプレッドシート閲覧用URL等の貼り間違いに気づけるようにする
-        if (v && v.indexOf('https://script.google.com/') !== 0) {
-          toast('注意：バックアップ用URLは https://script.google.com/… で始まります');
+        // 空欄はクラウド同期の解除として扱う
+        if (!v) { setGasUrl(''); toast('バックアップ先URLを消去しました'); return; }
+        // 貼り間違いは保存させない（以前は警告を出しつつ保存していたため、
+        // 誤ったURL宛に送り続けてバックアップできない状態に気づけなかった）
+        var chk = checkGasUrl(v);
+        if (!chk.ok) {
+          alert(chk.error);
+          e.target.value = getGasUrl();  // 保存済みの正しいURLを保つ
+          return;
         }
+        setGasUrl(chk.url);
+        toast('バックアップ先URLを保存しました');
       }
     });
     $('#syncSectionContainer').addEventListener('click', function (e) {
