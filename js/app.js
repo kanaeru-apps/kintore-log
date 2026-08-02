@@ -1389,10 +1389,18 @@
       '</div>';
   }
 
-  /* バックアップに毎回同梱する全種目リスト（「種目」シートに丸ごと保存される） */
+  /* バックアップに毎回同梱する全種目リスト（「種目」シートにマージ保存される） */
   function collectExerciseRows() {
     return DB.getExercises().map(function (x) {
       return [x.part, x.name, x.equip || '', x.video || '', x.note || ''];
+    });
+  }
+
+  /* 削除した種目（「種目」シートからも消すために送る）。
+     シートへの保存はマージ方式のため、削除は明示的に伝えないと反映されない */
+  function collectDeletedExerciseRows() {
+    return DB.deletedExercises().map(function (d) {
+      return [d.part, d.name, d.equip || ''];
     });
   }
 
@@ -1422,7 +1430,12 @@
     }
     if (syncInFlight) return;
     syncInFlight = true;
-    var payload = { dates: dates, rows: [], exercises: collectExerciseRows() };
+    var payload = {
+      dates: dates,
+      rows: [],
+      exercises: collectExerciseRows(),
+      deletedExercises: collectDeletedExerciseRows()
+    };
     dates.forEach(function (date) {
       rowsForDate(date).forEach(function (row) { payload.rows.push(row); });
     });
@@ -1448,6 +1461,7 @@
         if (json && json.ok === false) throw new Error(json.error || 'sync failed');
         DB.clearDirty(dates);
         DB.clearExercisesDirty();
+        DB.clearDeletedExercises(); // 削除がシートへ反映できたので控えを消す（失敗時は残り次回再送）
         setLastSync(new Date().toISOString());
         if (!opts.auto) toast(exOnly ? '種目リストをバックアップしました' : 'バックアップが完了しました（' + dates.length + '日分）');
       })

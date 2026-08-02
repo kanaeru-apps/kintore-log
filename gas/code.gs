@@ -1,9 +1,15 @@
 /**
- * 筋トレ記録PWA → Googleスプレッドシート 同期用 GAS Web App（Phase 4〜5 / v2）
+ * 筋トレ記録PWA → Googleスプレッドシート 同期用 GAS Web App（Phase 4〜5 / v3）
  *
  * v2（Phase 5）で追加された機能：
  * - 復元（action: 'restore'）：スプレッドシートの全記録＋種目リストをアプリへ返す
  * - 種目リストのバックアップ：「種目」シートに全種目を保存
+ *
+ * v3（v0.9.3）での変更：
+ * - 種目リストの保存を「全置換」から「マージ＋削除同期」に変更。
+ *   シートにしかない種目は残し、アプリで削除した種目（deletedExercises）だけを消す。
+ *   種目が少ない端末のバックアップでシート側の種目が消える事故を防ぐため。
+ *   ※アプリ v0.9.3 以降と組み合わせて使うこと（古いアプリからでも動作はする）
  *
  * 【セットアップ手順】
  * 1. 同期先にしたいGoogleスプレッドシートを新規作成（または既存のものを開く）
@@ -70,14 +76,81 @@ function getExSheet_() {
   return sheet;
 }
 
-/* 種目リストを丸ごと書き換える（アプリ側の全種目が毎回送られてくる） */
-function writeExercises_(exercises) {
+/* 種目の突合キー。種目シートにID列が無く、IDは端末ごとに採番されるため
+   「部位+種目名+器具」の3点で同一性を判定する（アプリ側のexKeyOfと同じ基準） */
+function exKey_(part, name, equip) {
+  return JSON.stringify([
+    String(part == null ? '' : part).trim(),
+    String(name == null ? '' : name).trim(),
+    String(equip == null ? '' : equip).trim()
+  ]);
+}
+
+/* アプリ側が空欄ならシート側の既存値を残す（スプレッドシートに直接書いた動画URL・メモを守る） */
+function pickValue_(appVal, sheetVal) {
+  var v = (appVal == null) ? '' : String(appVal);
+  if (v !== '') return v;
+  return (sheetVal == null) ? '' : String(sheetVal);
+}
+
+/* 種目リストをマージ方式で反映する（v3）。
+   - アプリにある種目：シートに無ければ追加、あれば動画URL・メモを更新（アプリ側が空ならシート側を維持）
+   - シートにしかない種目：他端末やスプレッドシートへの直接入力とみなして残す
+   - deleted に含まれる種目：アプリで削除されたものとしてシートからも消す
+   全置換をやめた理由：種目が少ない端末が一度バックアップしただけで、
+   シート側の種目が丸ごとその端末の内容に潰される事故を防ぐため */
+function writeExercises_(exercises, deleted) {
   var sheet = getExSheet_();
   var lastRow = sheet.getLastRow();
+  var existing = (lastRow >= 2)
+    ? sheet.getRange(2, 1, lastRow - 1, EX_HEADER.length).getValues()
+    : [];
+
+  var appRows = exercises || [];
+
+  // アプリ側に存在する種目は削除対象から外す（削除→同名で再登録した場合の取り違え防止）
+  var appKeys = {};
+  appRows.forEach(function (r) { appKeys[exKey_(r[0], r[1], r[2])] = true; });
+  var delSet = {};
+  (deleted || []).forEach(function (d) {
+    var k = exKey_(d[0], d[1], d[2]);
+    if (!appKeys[k]) delSet[k] = true;
+  });
+
+  // シートの既存行をキーで引けるようにする（削除対象・重複行・空行はここで落とす）
+  var sheetMap = {};
+  var sheetOrder = [];
+  existing.forEach(function (r) {
+    if (!String(r[1] == null ? '' : r[1]).trim()) return; // 種目名が空の行は無視
+    var k = exKey_(r[0], r[1], r[2]);
+    if (delSet[k] || sheetMap[k]) return;
+    sheetMap[k] = r;
+    sheetOrder.push(k);
+  });
+
+  // 並び順はアプリ側を優先し、シートにしかない種目はその後ろに置く
+  var out = [];
+  var used = {};
+  appRows.forEach(function (r) {
+    var k = exKey_(r[0], r[1], r[2]);
+    if (used[k]) return;
+    used[k] = true;
+    var prev = sheetMap[k];
+    out.push([
+      r[0], r[1], r[2],
+      pickValue_(r[3], prev ? prev[3] : ''),
+      pickValue_(r[4], prev ? prev[4] : '')
+    ]);
+  });
+  sheetOrder.forEach(function (k) {
+    if (used[k]) return;
+    used[k] = true;
+    out.push(sheetMap[k]);
+  });
+
+  // 削除で行数が減る場合があるため、一度消してからマージ結果を書き直す
   if (lastRow >= 2) sheet.getRange(2, 1, lastRow - 1, EX_HEADER.length).clearContent();
-  if (exercises.length) {
-    sheet.getRange(2, 1, exercises.length, EX_HEADER.length).setValues(exercises);
-  }
+  if (out.length) sheet.getRange(2, 1, out.length, EX_HEADER.length).setValues(out);
 }
 
 function json_(obj) {
@@ -125,10 +198,19 @@ function doPost(e) {
     }
     sortByDate_(sheet);
 
-    // 種目リストが同梱されていれば「種目」シートも更新
-    if (body.exercises && body.exercises.length) writeExercises_(body.exercises);
+    // 種目リストまたは削除指定が同梱されていれば「種目」シートをマージ更新する。
+    // どちらも無い場合（種目送信より前のバージョンのアプリ）は種目シートに触れない
+    var exList = body.exercises;
+    var delList = body.deletedExercises;
+    if (exList || delList) writeExercises_(exList || [], delList || []);
 
-    return json_({ ok: true, dates: dates.length, rows: rows.length });
+    return json_({
+      ok: true,
+      dates: dates.length,
+      rows: rows.length,
+      exercises: (exList || []).length,
+      deleted: (delList || []).length
+    });
   } catch (err) {
     return json_({ ok: false, error: String(err) });
   }

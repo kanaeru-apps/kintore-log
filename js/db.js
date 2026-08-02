@@ -72,6 +72,36 @@ var DB = (function () {
   /* 種目マスタの変更（追加・名称変更・情報更新・削除・並べ替え）も未送信変更として記憶する */
   function markExercisesDirty() { state.dirtyExercises = true; }
 
+  /* 種目の突合キー。スプレッドシート側の「種目」シートには種目IDの列が無く、IDは端末ごとに
+     採番されるため、部位+種目名+器具の3点で同一性を判定する（findExerciseと同じ基準） */
+  function exKeyOf(part, name, equip) {
+    // 区切り文字が種目名に混ざる心配が無いよう、JSON配列の文字列をキーにする
+    return JSON.stringify([
+      String(part == null ? '' : part),
+      String(name == null ? '' : name),
+      String(equip == null ? '' : equip)
+    ]);
+  }
+  /* 削除した種目の記録（tombstone）。バックアップはマージ方式（アプリに無い種目はシートに残す）
+     のため、「アプリから消えた＝削除された」とはGAS側で判定できない。削除を明示的に送るための控え */
+  function markExerciseDeleted(part, name, equip) {
+    if (!state.deletedExercises) state.deletedExercises = [];
+    var key = exKeyOf(part, name, equip);
+    var dup = state.deletedExercises.some(function (d) {
+      return exKeyOf(d.part, d.name, d.equip) === key;
+    });
+    if (!dup) state.deletedExercises.push({ part: part, name: name, equip: equip || '' });
+    markExercisesDirty();
+  }
+  /* 同じ種目が再登録・復元されたら削除の控えを取り消す（登録したのに次の同期で消される事故を防ぐ） */
+  function unmarkExerciseDeleted(part, name, equip) {
+    if (!state.deletedExercises || !state.deletedExercises.length) return;
+    var key = exKeyOf(part, name, equip);
+    state.deletedExercises = state.deletedExercises.filter(function (d) {
+      return exKeyOf(d.part, d.name, d.equip) !== key;
+    });
+  }
+
   /* 既存データを新しいデータ構造に引き上げる */
   function migrate() {
     if (state.version >= 2) return;
@@ -110,6 +140,11 @@ var DB = (function () {
             state.dirtyExercises = true;
             save();
           }
+          if (!state.deletedExercises) {
+            // 削除同期（v0.9.3）導入前からのデータ：控えが無いだけなので空で始める
+            state.deletedExercises = [];
+            save();
+          }
           return;
         }
       }
@@ -119,7 +154,8 @@ var DB = (function () {
       exercises: DEFAULTS.map(function (d, i) { return { id: 'd' + i, name: d[0], part: d[1], equip: d[2] }; }),
       workouts: {},
       dirtyDates: {},
-      dirtyExercises: true
+      dirtyExercises: true,
+      deletedExercises: []
     };
     save();
   }
@@ -170,6 +206,7 @@ var DB = (function () {
     if (ex) return ex;
     ex = { id: uid(), name: name, part: part, equip: equip || '' };
     state.exercises.push(ex);
+    unmarkExerciseDeleted(part, name, equip || '');
     markExercisesDirty();
     return ex;
   }
@@ -242,6 +279,8 @@ var DB = (function () {
     addExercise: function (name, part, equip) {
       var ex = { id: uid(), name: name, part: part, equip: equip || '' };
       state.exercises.push(ex);
+      // 以前に削除した種目と同じなら、削除の控えを取り消す（登録直後に消される事故を防ぐ）
+      unmarkExerciseDeleted(part, name, equip || '');
       markExercisesDirty();
       save();
       return ex;
@@ -249,6 +288,7 @@ var DB = (function () {
     renameExercise: function (id, name) {
       var ex = getExercise(id);
       if (!ex) return;
+      var oldName = ex.name;
       ex.name = name;
       // 各日の記録は登録時点の種目名をスナップショットとして持っているため、
       // 名称変更時はそれらも合わせて書き換える（削除時は履歴保護のためあえて残す仕様と非対称）
@@ -260,6 +300,12 @@ var DB = (function () {
         });
         if (changed) markDirty(date);
       });
+      // スプレッドシート側は部位+種目名+器具で突合するため、改名は「旧名の削除＋新名の追加」になる。
+      // 旧名を削除として送らないとシートに旧名が残り、復元で重複して戻ってくる
+      if (oldName !== name) {
+        markExerciseDeleted(ex.part, oldName, ex.equip);
+        unmarkExerciseDeleted(ex.part, name, ex.equip);
+      }
       markExercisesDirty();
       save();
     },
@@ -288,7 +334,10 @@ var DB = (function () {
       save();
     },
     deleteExercise: function (id) {
+      var ex = getExercise(id);
       state.exercises = state.exercises.filter(function (x) { return x.id !== id; });
+      // 削除をスプレッドシート側にも伝える控えを残す（残さないとシートに残り続け、復元で復活する）
+      if (ex) markExerciseDeleted(ex.part, ex.name, ex.equip);
       markExercisesDirty();
       save();
     },
@@ -372,8 +421,13 @@ var DB = (function () {
       (dates || []).forEach(function (d) { delete state.dirtyDates[d]; });
       save();
     },
-    exercisesDirty: function () { return !!state.dirtyExercises; },
+    exercisesDirty: function () {
+      return !!state.dirtyExercises || !!(state.deletedExercises && state.deletedExercises.length);
+    },
     clearExercisesDirty: function () { state.dirtyExercises = false; save(); },
+    /* 未送信の削除（tombstone）。バックアップ時に同梱し、成功したらクリアする */
+    deletedExercises: function () { return (state.deletedExercises || []).slice(); },
+    clearDeletedExercises: function () { state.deletedExercises = []; save(); },
 
     /* ---- CSVインポート（app.js側でCSVをパース・日付ごとにグルーピングした結果を受け取り反映する） ---- */
     /* dateOrder: 対象日付の配列。byDate: { date: { order:[entryKey...], entries:{entryKey:{part,name,equip,sets}}, memo } }
@@ -405,6 +459,8 @@ var DB = (function () {
           ex = { id: uid(), name: d.name, part: d.part, equip: d.equip || '' };
           state.exercises.push(ex);
         }
+        // 復元はスプレッドシートを正として取り込む操作なので、未送信の削除の控えは取り消す
+        unmarkExerciseDeleted(d.part, d.name, d.equip || '');
         if (d.video && !ex.video) ex.video = d.video;
         if (d.note && !ex.note) ex.note = d.note;
       });
@@ -420,6 +476,7 @@ var DB = (function () {
         var s = JSON.parse(json);
         if (!s || !s.exercises || !s.workouts) return false;
         if (!s.dirtyDates) s.dirtyDates = {};
+        if (!s.deletedExercises) s.deletedExercises = [];
         state = s;
         save();
         return true;
