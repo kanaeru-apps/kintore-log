@@ -1439,28 +1439,28 @@ button { cursor: pointer; }
 .gen-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .gen-row label { flex: 1; min-width: 0; font-size: 12px; color: var(--dim); }
 .gen-unit { font-size: 11px; color: var(--dim); width: 14px; flex-shrink: 0; }
-.stepper {
-  display: flex;
+/* 生成シートのステッパーだけを上書きする。
+   ここを素の `.stepper` で書くと、記録カードの重量・回数ステッパー（上の .stepper）まで
+   後勝ちで巻き込まれてしまうため、必ず #genSheet で閉じ込めること */
+#genSheet .stepper {
   align-items: center;
-  background: var(--panel2);
-  border: 1px solid var(--line);
+  height: auto;
   border-radius: 10px;
   flex-shrink: 0;
 }
-.stepper button { width: 34px; height: 40px; color: var(--dim); font-size: 17px; background: transparent; }
-.stepper button:active { color: var(--volt); }
-.stepper input {
+#genSheet .stepper button { width: 34px; height: 40px; font-size: 17px; background: transparent; }
+#genSheet .stepper input {
+  flex: none;
   width: 52px;
   height: 40px;
-  text-align: center;
-  font-family: var(--font-num);
   font-size: 22px;
   letter-spacing: 0.03em;
-  color: var(--text);
-  background: transparent;
   border: none;
 }
-.stepper input:focus { outline: none; color: var(--volt); }
+/* 分＋秒の2欄が入る時間用ステッパー。iPhoneの狭い幅に収めるため数字欄を詰める */
+#genSheet .stepper.time input { width: 38px; font-size: 20px; }
+#genSheet .stepper.time button { width: 30px; }
+#genSheet .stepper.time .tu { font-size: 10px; color: var(--dim); margin: 0 3px 0 1px; flex-shrink: 0; }
 .gen-note { font-size: 11.5px; color: var(--dim); letter-spacing: 0.04em; margin-top: 12px; }
 .gen-note b { color: var(--volt); font-size: 18px; margin: 0 2px; letter-spacing: 0.03em; }
 .gen-mode { font-size: 11.5px; color: var(--dim); margin-top: 2px; }

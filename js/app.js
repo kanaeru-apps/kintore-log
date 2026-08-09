@@ -688,6 +688,38 @@
     bindDirectInput('s', CTIME_MS_MAX);
   }
 
+  /* 数値欄をタップしたときのカーソル位置は、その欄が「どう編集されるか」で分ける。
+     ・continue（追記編集）… 有酸素の距離・時間・心拍。桁数が多く、消したいときは✕ボタンがある → 末尾に置く
+     ・replace（全置換）  … 生成シートの分・秒・本数。1〜2桁で必ず丸ごと打ち直す → 中身を全選択して上書きできるようにする
+     ここを「数値欄だから」と一括で末尾寄せにすると、全置換の欄が「打ち直せない欄」になる（v0.10.1で実際に踏んだ）。
+     なお focus だけでは効かない：iOS Safari は focus のあとに「タップした位置」へカーソルを置き直すため、
+     pointerup 後にもう一度寄せ直す */
+  function caretToEnd(input) {
+    if (input.selectionStart !== input.selectionEnd) return;  /* ドラッグで範囲選択中は動かさない */
+    var n = input.value.length;
+    try { input.setSelectionRange(n, n); } catch (err) { /* type次第で失敗するが実害なし */ }
+  }
+  function caretSelectAll(input) {
+    try { input.setSelectionRange(0, input.value.length); } catch (err) { /* 同上 */ }
+  }
+  /* rootSel の中の inputSel に place のふるまいを付ける（記録カードと生成シートで共用） */
+  function bindCaretPlacement(rootSel, inputSel, place) {
+    var root = $(rootSel);
+    if (!root) return;
+    root.addEventListener('focusin', function (e) {
+      var input = e.target.closest(inputSel);
+      if (input) place(input);
+    });
+    root.addEventListener('pointerup', function (e) {
+      var input = e.target.closest(inputSel);
+      if (!input) return;
+      setTimeout(function () {
+        /* ドラッグで範囲を選んだ直後は邪魔しない */
+        if (document.activeElement === input && input.selectionStart === input.selectionEnd) place(input);
+      }, 0);
+    });
+  }
+
   /* ================== インターバル一括生成 ================== */
   var GEN_CFG_KEY = 'kintore_interval_cfg';
   var GEN_LIMIT = { work: [5, 1800], rest: [0, 1800], reps: [1, 60] };
@@ -714,12 +746,31 @@
     return Math.max(r[0], Math.min(r[1], Math.round(v)));
   }
 
+  /* WORK/RESTの長さは内部では「合計秒」で持ち、画面には分・秒の2欄に割って出す。
+     こうしておくと保存形式（秒）も doGen も変えずに済み、±ボタンも合計秒に足すだけでよい */
+  var GEN_TIME_FIELD = { work: ['#genWorkM', '#genWorkS'], rest: ['#genRestM', '#genRestS'] };
+  var GEN_ALL_INPUT = ['#genWorkM', '#genWorkS', '#genRestM', '#genRestS', '#genReps'];
+
+  function showGen(k) {
+    if (k === 'reps') { $('#genReps').value = String(genCfg.reps); return; }
+    var f = GEN_TIME_FIELD[k];
+    $(f[0]).value = String(Math.floor(genCfg[k] / 60));
+    $(f[1]).value = ('0' + (genCfg[k] % 60)).slice(-2);
+  }
+  /* 秒欄に90と打たれても弾かず、いったん合計秒として受け取る（確定時に1分30秒へ整えられる） */
+  function readGenTime(k) {
+    var f = GEN_TIME_FIELD[k];
+    var m = parseInt($(f[0]).value, 10);
+    var s = parseInt($(f[1]).value, 10);
+    return (isNaN(m) ? 0 : m) * 60 + (isNaN(s) ? 0 : s);
+  }
+
   function openGen(entryId) {
     genTarget = entryId;
     rememberPageScroll();
-    $('#genWork').value = String(genCfg.work);
-    $('#genRest').value = String(genCfg.rest);
-    $('#genReps').value = String(genCfg.reps);
+    showGen('work');
+    showGen('rest');
+    showGen('reps');
     renderGenPreview();
     $('#genBackdrop').classList.add('show');
     $('#genSheet').classList.add('show');
@@ -728,7 +779,7 @@
   function closeGen() {
     $('#genBackdrop').classList.remove('show');
     $('#genSheet').classList.remove('show');
-    ['#genWork', '#genRest', '#genReps'].forEach(function (id) { $(id).blur(); });
+    GEN_ALL_INPUT.forEach(function (id) { $(id).blur(); });
     genTarget = null;
     restorePageScroll();
   }
@@ -756,8 +807,7 @@
 
   function setGen(k, v) {
     genCfg[k] = clampGen(k, v);
-    var el = $(k === 'work' ? '#genWork' : k === 'rest' ? '#genRest' : '#genReps');
-    el.value = String(genCfg[k]);
+    showGen(k);
     renderGenPreview();
   }
 
@@ -793,16 +843,26 @@
       var p = b.dataset.step.split(',');
       setGen(p[0], genCfg[p[0]] + (+p[1]));
     });
-    [['work', '#genWork'], ['rest', '#genRest'], ['reps', '#genReps']].forEach(function (pair) {
-      $(pair[1]).addEventListener('input', function (e) {
-        var v = parseInt(e.target.value, 10);
-        if (isNaN(v)) return;
-        genCfg[pair[0]] = clampGen(pair[0], v);
-        renderGenPreview();
+    // 入力中は値を直さない（「3」を打つ途中で勝手に丸めない・分を消している最中に0を書き戻さない）。
+    // 確定（blur）したときに初めて範囲へ収め、分と秒に割り直して表示する
+    ['work', 'rest'].forEach(function (k) {
+      GEN_TIME_FIELD[k].forEach(function (id) {
+        $(id).addEventListener('input', function () {
+          genCfg[k] = clampGen(k, readGenTime(k));
+          renderGenPreview();
+        });
+        $(id).addEventListener('change', function () { setGen(k, genCfg[k]); });
       });
-      // 入力中は値を直さず（「3」を打つ途中で勝手に丸めない）、確定時に範囲へ収める
-      $(pair[1]).addEventListener('change', function () { setGen(pair[0], genCfg[pair[0]]); });
     });
+    $('#genReps').addEventListener('input', function (e) {
+      var v = parseInt(e.target.value, 10);
+      if (isNaN(v)) return;
+      genCfg.reps = clampGen('reps', v);
+      renderGenPreview();
+    });
+    $('#genReps').addEventListener('change', function () { setGen('reps', genCfg.reps); });
+
+    bindCaretPlacement('#genSheet', 'input.num', caretSelectAll);
   }
 
   /* ================== 記録タブ ================== */
@@ -1254,25 +1314,7 @@
       }
     });
 
-    /* 数値欄をタップしたらカーソルを末尾に置く。
-       focus だけでは効かない：iOS Safari は focus のあとに「タップした位置」へカーソルを置き直すため、
-       pointerup 後にもう一度末尾へ寄せる。範囲選択中（ドラッグで選んだ）は動かさない */
-    function caretToEnd(input) {
-      if (input.selectionStart !== input.selectionEnd) return;
-      var n = input.value.length;
-      try { input.setSelectionRange(n, n); } catch (err) { /* type次第で失敗するが実害なし */ }
-    }
-    $('#entries').addEventListener('focusin', function (e) {
-      var input = e.target.closest('input[data-field]');
-      if (input) caretToEnd(input);
-    });
-    $('#entries').addEventListener('pointerup', function (e) {
-      var input = e.target.closest('input[data-field]');
-      if (!input) return;
-      setTimeout(function () {
-        if (document.activeElement === input) caretToEnd(input);
-      }, 0);
-    });
+    bindCaretPlacement('#entries', 'input[data-field]', caretToEnd);
 
     /* ✕（クリア）は pointerdown で処理する。
        click まで待つと先に input が blur → change → renderLog が走り、

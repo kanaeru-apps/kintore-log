@@ -17,7 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.10.0">
+<link rel="stylesheet" href="css/style.css?v=0.10.1">
 </head>
 <body>
 <div id="app">
@@ -251,7 +251,7 @@
 
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレ記録 v0.10.0 — Phase 7</p>
+      <p class="version">筋トレ記録 v0.10.1 — Phase 7</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -457,23 +457,29 @@
     <div class="gen-body">
       <div class="gen-row">
         <span class="zchip num z-hi">WORK</span>
-        <label for="genWork">高強度の長さ</label>
-        <div class="stepper">
+        <label for="genWorkS">高強度の長さ</label>
+        <div class="stepper time">
           <button type="button" data-step="work,-5" aria-label="WORKを5秒減らす">−</button>
-          <input type="text" id="genWork" class="num" inputmode="numeric" pattern="[0-9]*">
+          <input type="text" id="genWorkM" class="num" inputmode="numeric" pattern="[0-9]*" aria-label="WORKの分">
+          <span class="tu">分</span>
+          <input type="text" id="genWorkS" class="num" inputmode="numeric" pattern="[0-9]*" aria-label="WORKの秒">
+          <span class="tu">秒</span>
           <button type="button" data-step="work,5" aria-label="WORKを5秒増やす">＋</button>
         </div>
-        <span class="gen-unit">秒</span>
+        <span class="gen-unit"></span>
       </div>
       <div class="gen-row">
         <span class="zchip num z-rec">REST</span>
-        <label for="genRest">回復の長さ</label>
-        <div class="stepper">
+        <label for="genRestS">回復の長さ</label>
+        <div class="stepper time">
           <button type="button" data-step="rest,-5" aria-label="RESTを5秒減らす">−</button>
-          <input type="text" id="genRest" class="num" inputmode="numeric" pattern="[0-9]*">
+          <input type="text" id="genRestM" class="num" inputmode="numeric" pattern="[0-9]*" aria-label="RESTの分">
+          <span class="tu">分</span>
+          <input type="text" id="genRestS" class="num" inputmode="numeric" pattern="[0-9]*" aria-label="RESTの秒">
+          <span class="tu">秒</span>
           <button type="button" data-step="rest,5" aria-label="RESTを5秒増やす">＋</button>
         </div>
-        <span class="gen-unit">秒</span>
+        <span class="gen-unit"></span>
       </div>
       <div class="gen-row">
         <span class="zchip num z-none">×</span>
@@ -494,9 +500,9 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.10.0"></script>
-<script src="js/app.js?v=0.10.0"></script>
-<script src="js/charts.js?v=0.10.0"></script>
+<script src="js/db.js?v=0.10.1"></script>
+<script src="js/app.js?v=0.10.1"></script>
+<script src="js/charts.js?v=0.10.1"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});
