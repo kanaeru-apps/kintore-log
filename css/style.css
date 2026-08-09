@@ -367,6 +367,99 @@ button { cursor: pointer; }
 .cf-inputwrap input::placeholder { color: #3a3f49; }
 .cf-unit { font-size: 11px; color: var(--dim); white-space: nowrap; }
 
+/* 入力欄のクリア（✕）。値が入っているときだけ .on で表示する */
+.cf-clear {
+  flex-shrink: 0;
+  width: 20px;
+  align-self: center;
+  font-size: 12px;
+  line-height: 1;
+  color: #4a505a;
+  background: transparent;
+  visibility: hidden;
+}
+.cf-clear.on { visibility: visible; }
+.cf-clear:active { color: var(--danger); }
+
+/* ---------------- インターバル（WORK / REST） ---------------- */
+.zchip {
+  flex-shrink: 0;
+  min-width: 52px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  line-height: 1.5;
+  text-align: center;
+  border: 1px solid transparent;
+}
+.z-hi { background: var(--volt); color: var(--ink); }
+.z-rec { background: transparent; border-color: #4a7fd4; color: #8fb6f5; }
+.z-none { background: transparent; border-color: var(--line); color: #4a505a; }
+
+/* 強度タグ付きセッションは1行に畳む。16本並んでも読める高さに収めるのが狙い */
+.lap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 4px 7px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.lap:active { background: var(--panel2); }
+.lap.open { border-bottom-color: transparent; }
+.lap-n { color: #4a505a; font-size: 13px; min-width: 16px; text-align: center; }
+.lap-t { font-size: 17px; color: var(--text); letter-spacing: 0.03em; flex-shrink: 0; }
+.lap-t.empty { color: #4a505a; }
+.lap-sub {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: 11px;
+  color: var(--dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lap-caret { color: #4a505a; font-size: 9px; flex-shrink: 0; }
+.lap-body {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  margin: 0 0 8px;
+}
+.lap-del { display: block; margin: 10px 0 0 auto; font-size: 12px; }
+
+/* 強度別の内訳（カード下部） */
+.zsum { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.zsum span {
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.04em;
+}
+.zsum i {
+  font-style: normal;
+  font-family: var(--font-num);
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  margin-right: 3px;
+}
+.zsum .z-hi { background: transparent; color: var(--volt); }
+.zsum .z-rec { border: none; color: #8fb6f5; }
+
+.btn-interval {
+  margin-left: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 12px;
+  font-family: var(--font-body);
+}
+.btn-interval:active { border-color: var(--volt); color: var(--volt); }
+.entry-foot .vol { margin-left: auto; }
+
 /* ---------------- ボタン ---------------- */
 .btn {
   display: block;
@@ -1311,6 +1404,66 @@ button { cursor: pointer; }
   padding-bottom: calc(14px + env(safe-area-inset-bottom));
 }
 #ctimeSheet.show { transform: translate(-50%, 0); }
+
+/* 有酸素：インターバル一括生成シート（時間ピッカーと同じ表示方式） */
+#genBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  z-index: 58;
+}
+#genBackdrop.show { opacity: 1; pointer-events: auto; }
+
+#genSheet {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translate(-50%, 105%);
+  width: 100%;
+  max-width: 480px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 22px 22px 0 0;
+  z-index: 59;
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+}
+#genSheet.show { transform: translate(-50%, 0); }
+#genSheet .drum-title { font-family: var(--font-num); letter-spacing: 0.16em; color: var(--volt); }
+
+.gen-body { padding: 10px 18px 6px; }
+.gen-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.gen-row label { flex: 1; min-width: 0; font-size: 12px; color: var(--dim); }
+.gen-unit { font-size: 11px; color: var(--dim); width: 14px; flex-shrink: 0; }
+.stepper {
+  display: flex;
+  align-items: center;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.stepper button { width: 34px; height: 40px; color: var(--dim); font-size: 17px; background: transparent; }
+.stepper button:active { color: var(--volt); }
+.stepper input {
+  width: 52px;
+  height: 40px;
+  text-align: center;
+  font-family: var(--font-num);
+  font-size: 22px;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  background: transparent;
+  border: none;
+}
+.stepper input:focus { outline: none; color: var(--volt); }
+.gen-note { font-size: 11.5px; color: var(--dim); letter-spacing: 0.04em; margin-top: 12px; }
+.gen-note b { color: var(--volt); font-size: 18px; margin: 0 2px; letter-spacing: 0.03em; }
+.gen-mode { font-size: 11.5px; color: var(--dim); margin-top: 2px; }
 
 /* 日付選択カレンダー（記録タブの日付タップで表示。重量ドラムと同じシート方式） */
 #dateCalBackdrop {

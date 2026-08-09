@@ -43,7 +43,8 @@ var Charts = (function () {
       if (cardio) {
         var t = 0, d = 0;
         matched.forEach(function (e) {
-          e.sets.forEach(function (s) { t += (+s.t || 0); d += (+s.d || 0); });
+          // インターバルは30秒・90秒がすべて秒(ts)側に入るため、分(t)だけを足すと0分になってしまう
+          e.sets.forEach(function (s) { t += (+s.t || 0) + (+s.ts || 0) / 60; d += (+s.d || 0); });
         });
         rows.push({ date: date, cardio: true, t: t, d: d });
       } else {

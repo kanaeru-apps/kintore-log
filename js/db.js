@@ -11,8 +11,10 @@ var DB = (function () {
   var PARTS = ['胸', '背中', '脚', '肩', '腕', '腹', '有酸素', 'その他'];
   var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重'];
   var CARDIO_PART = '有酸素';
-  /* 有酸素セットのフィールド：時間(t/分)・秒(ts/0-59)・距離(d/km)・速度(sp/km/h)・傾斜(inc/%)・カロリー(cal/kcal)・心拍(hr/bpm) */
-  var CARDIO_KEYS = ['t', 'ts', 'd', 'sp', 'inc', 'cal', 'hr'];
+  /* 有酸素セットのフィールド：時間(t/分)・秒(ts/0-59)・距離(d/km)・速度(sp/km/h)・傾斜(inc/%)・カロリー(cal/kcal)・心拍(hr/bpm)
+     z はインターバルの強度ラベル（'hi'=WORK / 'rec'=REST / ''=タグなし）。他と違い数値ではなく文字列で、
+     実施セットの判定には使わない（強度だけ付いていて中身が空のセッションを「実施した」と数えないため） */
+  var CARDIO_KEYS = ['t', 'ts', 'd', 'sp', 'inc', 'cal', 'hr', 'z'];
   var DEFAULTS = [
     ['ベンチプレス', '胸', 'バーベル'], ['ダンベルプレス', '胸', 'ダンベル'], ['インクラインベンチプレス', '胸', 'バーベル'], ['ダンベルフライ', '胸', 'ダンベル'], ['チェストプレス', '胸', 'マシン'],
     ['デッドリフト', '背中', 'バーベル'], ['ラットプルダウン', '背中', 'マシン'], ['ベントオーバーロー', '背中', 'バーベル'], ['シーテッドロー', '背中', 'ケーブル'], ['懸垂', '背中', '自重'],
@@ -399,6 +401,23 @@ var DB = (function () {
     removeSet: function (date, entryId, idx) {
       var e = findEntry(date, entryId);
       if (e) { e.sets.splice(idx, 1); markDirty(date); save(); }
+    },
+    /* インターバルの一括生成。listは {t,ts,z,…} の配列で、指定が無いフィールドは空のまま。
+       replaceAll=true なら既存セットを置き換え、falseなら末尾に足す（入力済みの記録を消さないため）。
+       セットを1つずつaddSet+updateSetで作ると保存が本数分走るので、まとめて1回で書き込む */
+    addCardioSets: function (date, entryId, list, replaceAll) {
+      var e = findEntry(date, entryId);
+      if (!e || !list || !list.length) return;
+      var made = list.map(function (src) {
+        var s = emptySet(e.part);
+        Object.keys(src).forEach(function (k) {
+          if (Object.prototype.hasOwnProperty.call(s, k)) s[k] = cp(src[k]);
+        });
+        return s;
+      });
+      e.sets = replaceAll ? made : e.sets.concat(made);
+      markDirty(date);
+      save();
     },
     setMemo: function (date, text) { ensure(date).memo = text; markDirty(date); save(); },
     prevRecord: prevRecord,

@@ -17,7 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.9.3">
+<link rel="stylesheet" href="css/style.css?v=0.10.0">
 </head>
 <body>
 <div id="app">
@@ -251,7 +251,7 @@
 
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレ記録 v0.9.3 — Phase 6</p>
+      <p class="version">筋トレ記録 v0.10.0 — Phase 7</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -446,13 +446,57 @@
     </div>
   </div>
 
+  <!-- 有酸素：インターバル一括生成 -->
+  <div id="genBackdrop"></div>
+  <div id="genSheet" role="dialog" aria-label="インターバルを一括作成">
+    <div class="drum-head">
+      <button id="genCancel" class="drum-cancel">キャンセル</button>
+      <span class="drum-title">⚡ INTERVAL</span>
+      <button id="genDo" class="drum-done">生成</button>
+    </div>
+    <div class="gen-body">
+      <div class="gen-row">
+        <span class="zchip num z-hi">WORK</span>
+        <label for="genWork">高強度の長さ</label>
+        <div class="stepper">
+          <button type="button" data-step="work,-5" aria-label="WORKを5秒減らす">−</button>
+          <input type="text" id="genWork" class="num" inputmode="numeric" pattern="[0-9]*">
+          <button type="button" data-step="work,5" aria-label="WORKを5秒増やす">＋</button>
+        </div>
+        <span class="gen-unit">秒</span>
+      </div>
+      <div class="gen-row">
+        <span class="zchip num z-rec">REST</span>
+        <label for="genRest">回復の長さ</label>
+        <div class="stepper">
+          <button type="button" data-step="rest,-5" aria-label="RESTを5秒減らす">−</button>
+          <input type="text" id="genRest" class="num" inputmode="numeric" pattern="[0-9]*">
+          <button type="button" data-step="rest,5" aria-label="RESTを5秒増やす">＋</button>
+        </div>
+        <span class="gen-unit">秒</span>
+      </div>
+      <div class="gen-row">
+        <span class="zchip num z-none">×</span>
+        <label for="genReps">くり返す本数</label>
+        <div class="stepper">
+          <button type="button" data-step="reps,-1" aria-label="本数を減らす">−</button>
+          <input type="text" id="genReps" class="num" inputmode="numeric" pattern="[0-9]*">
+          <button type="button" data-step="reps,1" aria-label="本数を増やす">＋</button>
+        </div>
+        <span class="gen-unit">本</span>
+      </div>
+      <p class="gen-note">合計 <b class="num" id="genTotal">—</b> ・ <b class="num" id="genCount">0</b> セッション</p>
+      <p class="gen-mode" id="genMode"></p>
+    </div>
+  </div>
+
   <div id="toast" role="status"></div>
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.9.3"></script>
-<script src="js/app.js?v=0.9.3"></script>
-<script src="js/charts.js?v=0.9.3"></script>
+<script src="js/db.js?v=0.10.0"></script>
+<script src="js/app.js?v=0.10.0"></script>
+<script src="js/charts.js?v=0.10.0"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});

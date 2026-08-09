@@ -11,6 +11,14 @@
  *   種目が少ない端末のバックアップでシート側の種目が消える事故を防ぐため。
  *   ※アプリ v0.9.3 以降と組み合わせて使うこと（古いアプリからでも動作はする）
  *
+ * v4（v0.10.0）での変更：
+ * - 記録シートに「強度」列（WORK / REST）を追加＝17列から18列へ。
+ * - 列数を固定で扱うのをやめ、送られてきた行の列数に合わせて書くようにした。
+ *   これで「アプリだけ新しい／GASだけ新しい」どちらの組み合わせでも書き込みが落ちない。
+ * - 既存シート（17列で作られたもの）は、次回の書き込み時に18列目の見出しを自動で補う。
+ * ※このv4を先に再デプロイしてから、アプリ v0.10.0 を配布すること。
+ *   逆順にすると18列の行を17列の範囲に書こうとして同期がエラーになる。
+ *
  * 【セットアップ手順】
  * 1. 同期先にしたいGoogleスプレッドシートを新規作成（または既存のものを開く）
  * 2. メニュー「拡張機能」→「Apps Script」を開く
@@ -29,18 +37,42 @@
 var SHEET_NAME = '記録';
 var HEADER = ['日付', '曜日', '部位', '種目', '器具', 'セット',
   '重量kg', '回数', 'ボリュームkg',
-  '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ'];
+  '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ', '強度'];
 var EX_SHEET_NAME = '種目';
 var EX_HEADER = ['部位', '種目', '器具', '動画URL', 'メモ'];
+
+/* シートが実際に使っている列数。HEADER.length を決め打ちにすると、
+   17列で作られた既存シートと18列のHEADERが食い違ったときに読み書きが壊れるため、
+   「見出し行の実際の長さ」と「HEADERの長さ」の大きいほうを使う */
+function colCount_(sheet) {
+  var used = sheet.getLastColumn();
+  return Math.max(used || 0, HEADER.length);
+}
+
+/* シートの列が足りなければ広げる（getRangeは存在しない列を指定すると例外になる） */
+function ensureColumns_(sheet, need) {
+  var max = sheet.getMaxColumns();
+  if (max < need) sheet.insertColumnsAfter(max, need - max);
+}
 
 function getSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
   if (sheet.getLastRow() === 0) {
+    ensureColumns_(sheet, HEADER.length);
     sheet.appendRow(HEADER);
     // 日付列がスプレッドシートに日付型として自動変換されるのを防ぐ（文字列のまま保持）
     sheet.getRange('A:A').setNumberFormat('@');
+  } else {
+    // 17列時代に作られたシートに「強度」見出しを後から補う
+    ensureColumns_(sheet, HEADER.length);
+    var head = sheet.getRange(1, 1, 1, HEADER.length).getValues()[0];
+    for (var i = 0; i < HEADER.length; i++) {
+      if (String(head[i] == null ? '' : head[i]).trim() === '') {
+        sheet.getRange(1, i + 1).setValue(HEADER[i]);
+      }
+    }
   }
   return sheet;
 }
@@ -65,7 +97,7 @@ function deleteRowsForDates_(sheet, dates) {
 function sortByDate_(sheet) {
   var lastRow = sheet.getLastRow();
   if (lastRow < 3) return;
-  sheet.getRange(2, 1, lastRow - 1, HEADER.length).sort({ column: 1, ascending: true });
+  sheet.getRange(2, 1, lastRow - 1, colCount_(sheet)).sort({ column: 1, ascending: true });
 }
 
 function getExSheet_() {
@@ -164,7 +196,7 @@ function doRestore_() {
   var rows = [];
   var lastRow = sheet.getLastRow();
   if (lastRow >= 2) {
-    rows = sheet.getRange(2, 1, lastRow - 1, HEADER.length).getValues();
+    rows = sheet.getRange(2, 1, lastRow - 1, colCount_(sheet)).getValues();
     rows.forEach(function (r) {
       if (r[0] instanceof Date) {
         r[0] = Utilities.formatDate(r[0], Session.getScriptTimeZone(), 'yyyy-MM-dd');
@@ -194,7 +226,13 @@ function doPost(e) {
 
     if (dates.length) deleteRowsForDates_(sheet, dates);
     if (rows.length) {
-      sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, HEADER.length).setValues(rows);
+      // 列数は送られてきた行に合わせる（古いアプリは17列、v0.10.0以降は18列）。
+      // 行ごとに長さが違うと setValues が落ちるため、最長に合わせて空文字で埋める
+      var width = 0;
+      rows.forEach(function (r) { if (r.length > width) width = r.length; });
+      rows.forEach(function (r) { while (r.length < width) r.push(''); });
+      ensureColumns_(sheet, width);
+      sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, width).setValues(rows);
     }
     sortByDate_(sheet);
 

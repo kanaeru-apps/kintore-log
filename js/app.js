@@ -18,20 +18,49 @@
     { k: 'cal', label: 'カロリー', unit: 'kcal', step: '1' },
     { k: 'hr', label: '心拍', unit: 'bpm', step: '1' }
   ];
-  /* 実施セット判定・CSV用の全キー（時間は t=分・ts=秒 の2フィールド） */
+  /* 実施セット判定・CSV用の全キー（時間は t=分・ts=秒 の2フィールド）。
+     強度(z)は数値ではなくラベルなので、ここには含めない＝強度だけ付いた空セッションは「実施した」と数えない */
   var CARDIO_KEYS_ALL = ['t', 'ts'].concat(CARDIO_FIELDS.map(function (f) { return f.k; }));
+  /* インターバルの強度ラベル。csvはスプレッドシート・CSVに書き出す文字列 */
+  var ZONES = {
+    hi: { label: 'WORK', cls: 'z-hi', csv: 'WORK' },
+    rec: { label: 'REST', cls: 'z-rec', csv: 'REST' }
+  };
+  /* チップをタップしたときの巡回順（WORK → REST → タグなし） */
+  var ZONE_ORDER = ['hi', 'rec', ''];
+  function zoneOf(s) { return (s && ZONES[s.z]) ? s.z : ''; }
+  function zoneCsv(z) { return ZONES[z] ? ZONES[z].csv : ''; }
+  /* CSV・スプレッドシートの文字列 → 内部キー。手で「強」「緩」と書かれていても拾う */
+  function zoneFromCsv(v) {
+    var t = String(v == null ? '' : v).trim().toUpperCase();
+    if (t === 'WORK' || t === '強' || t === 'HI') return 'hi';
+    if (t === 'REST' || t === '緩' || t === 'REC') return 'rec';
+    return '';
+  }
+  function hasZone(e) {
+    return isCardio(e) && e.sets.some(function (s) { return zoneOf(s); });
+  }
   function isCardio(e) { return e && e.part === CARDIO_PART; }
   /* 時間(分)+秒 を「1時間05分30秒」のように整形。未入力ならnull */
   function fmtCardioTime(s) {
     if (s.t === '' && s.ts === '') return null;
-    var t = +s.t || 0, ts = +s.ts || 0;
-    var h = Math.floor(t / 60), m = t % 60;
+    return fmtSeconds(setSeconds(s));
+  }
+  /* セッションの長さを秒で返す（t=分・ts=秒） */
+  function setSeconds(s) { return (+s.t || 0) * 60 + (+s.ts || 0); }
+  /* 秒 → 「16分00秒」「1時間05分30秒」「30秒」。
+     インターバルの30秒・90秒を「0分30秒」と書くと読みづらいので、0分のときは分を省く */
+  function fmtSeconds(sec) {
+    sec = Math.max(0, Math.round(sec));
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    if (!h && !m) return s + '秒';
     var mm = h > 0 ? ('0' + m).slice(-2) : String(m);
-    var ss = ('0' + ts).slice(-2);
-    return (h > 0 ? h + '時間' : '') + mm + '分' + ss + '秒';
+    return (h > 0 ? h + '時間' : '') + mm + '分' + ('0' + s).slice(-2) + '秒';
   }
 
-  var ui = { tab: 'log', date: DB.todayStr(), pickerPart: '胸', expanded: {}, sheetEdit: false, exExpanded: {} };
+  /* lapOpen: インターバル行のうち今開いているもの（キーは entryId + '/' + セッション番号）。
+     再描画のたびに閉じてしまわないよう、DOMではなくここで状態を持つ */
+  var ui = { tab: 'log', date: DB.todayStr(), pickerPart: '胸', expanded: {}, sheetEdit: false, exExpanded: {}, lapOpen: {} };
   var dateCal = { year: null, month: null };
 
   /* ---------- ユーティリティ ---------- */
@@ -80,7 +109,8 @@
       if (isCardio(e)) {
         if (f.length) st.hasCardio = true;
         f.forEach(function (s) {
-          st.time += (+s.t || 0);
+          // 分(t)だけを足すとインターバルの30秒・90秒がすべて0分になってしまうため秒(ts)も含める
+          st.time += setSeconds(s) / 60;
           st.dist += (+s.d || 0);
         });
       } else {
@@ -658,10 +688,138 @@
     bindDirectInput('s', CTIME_MS_MAX);
   }
 
+  /* ================== インターバル一括生成 ================== */
+  var GEN_CFG_KEY = 'kintore_interval_cfg';
+  var GEN_LIMIT = { work: [5, 1800], rest: [0, 1800], reps: [1, 60] };
+  var genTarget = null;
+  var genCfg = { work: 30, rest: 90, reps: 8 };
+
+  /* 最後に使った構成を端末に覚えておく＝次に開いたときの初期値。設定画面に項目を増やさずに済む */
+  function loadGenCfg() {
+    var raw = null;
+    try { raw = localStorage.getItem(GEN_CFG_KEY); } catch (e) { return; }
+    if (!raw) return;
+    try {
+      var o = JSON.parse(raw);
+      ['work', 'rest', 'reps'].forEach(function (k) {
+        if (typeof o[k] === 'number' && isFinite(o[k])) genCfg[k] = clampGen(k, o[k]);
+      });
+    } catch (e) { /* 壊れていれば既定値のまま使う */ }
+  }
+  function saveGenCfg() {
+    try { localStorage.setItem(GEN_CFG_KEY, JSON.stringify(genCfg)); } catch (e) { /* noop */ }
+  }
+  function clampGen(k, v) {
+    var r = GEN_LIMIT[k];
+    return Math.max(r[0], Math.min(r[1], Math.round(v)));
+  }
+
+  function openGen(entryId) {
+    genTarget = entryId;
+    rememberPageScroll();
+    $('#genWork').value = String(genCfg.work);
+    $('#genRest').value = String(genCfg.rest);
+    $('#genReps').value = String(genCfg.reps);
+    renderGenPreview();
+    $('#genBackdrop').classList.add('show');
+    $('#genSheet').classList.add('show');
+  }
+
+  function closeGen() {
+    $('#genBackdrop').classList.remove('show');
+    $('#genSheet').classList.remove('show');
+    ['#genWork', '#genRest', '#genReps'].forEach(function (id) { $(id).blur(); });
+    genTarget = null;
+    restorePageScroll();
+  }
+
+  /* 生成対象のセッションが「まだ何も入力されていない空セッションだけ」かどうか。
+     空だけなら置き換え、1つでも入力済みがあれば末尾に足す＝入力を消さない */
+  function genWouldReplace(entryId) {
+    var w = DB.getWorkout(ui.date);
+    var e = ((w && w.entries) || []).filter(function (x) { return x.id === entryId; })[0];
+    if (!e) return true;
+    return !e.sets.some(function (s) {
+      return CARDIO_KEYS_ALL.some(function (k) { return s[k] !== '' && s[k] != null; });
+    });
+  }
+
+  function renderGenPreview() {
+    var total = (genCfg.work + genCfg.rest) * genCfg.reps;
+    var count = genCfg.reps * (genCfg.rest > 0 ? 2 : 1);
+    $('#genTotal').textContent = fmtSeconds(total);
+    $('#genCount').textContent = String(count);
+    $('#genMode').textContent = genTarget && genWouldReplace(genTarget)
+      ? '空のセッションを置き換えます'
+      : '入力済みの記録は残し、末尾に追加します';
+  }
+
+  function setGen(k, v) {
+    genCfg[k] = clampGen(k, v);
+    var el = $(k === 'work' ? '#genWork' : k === 'rest' ? '#genRest' : '#genReps');
+    el.value = String(genCfg[k]);
+    renderGenPreview();
+  }
+
+  function doGen() {
+    if (!genTarget) return;
+    var list = [];
+    for (var i = 0; i < genCfg.reps; i++) {
+      list.push({ t: Math.floor(genCfg.work / 60), ts: genCfg.work % 60, z: 'hi' });
+      // REST 0秒はインターバルでなく単純な反復なので、REST行そのものを作らない
+      if (genCfg.rest > 0) list.push({ t: Math.floor(genCfg.rest / 60), ts: genCfg.rest % 60, z: 'rec' });
+    }
+    var replace = genWouldReplace(genTarget);
+    DB.addCardioSets(ui.date, genTarget, list, replace);
+    saveGenCfg();
+    // 一気に増えた行が全部開いていると読めないので、生成後は全部閉じた状態にする
+    Object.keys(ui.lapOpen).forEach(function (key) {
+      if (key.indexOf(genTarget + '/') === 0) delete ui.lapOpen[key];
+    });
+    toast(list.length + 'セッションを' + (replace ? '作成' : '追加') + 'しました');
+    closeGen();
+    renderLog();
+  }
+
+  function bindGen() {
+    loadGenCfg();
+    $('#genDo').onclick = doGen;
+    $('#genCancel').onclick = closeGen;
+    $('#genBackdrop').onclick = closeGen;
+
+    $('#genSheet').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-step]');
+      if (!b) return;
+      var p = b.dataset.step.split(',');
+      setGen(p[0], genCfg[p[0]] + (+p[1]));
+    });
+    [['work', '#genWork'], ['rest', '#genRest'], ['reps', '#genReps']].forEach(function (pair) {
+      $(pair[1]).addEventListener('input', function (e) {
+        var v = parseInt(e.target.value, 10);
+        if (isNaN(v)) return;
+        genCfg[pair[0]] = clampGen(pair[0], v);
+        renderGenPreview();
+      });
+      // 入力中は値を直さず（「3」を打つ途中で勝手に丸めない）、確定時に範囲へ収める
+      $(pair[1]).addEventListener('change', function () { setGen(pair[0], genCfg[pair[0]]); });
+    });
+  }
+
   /* ================== 記録タブ ================== */
   function statTile(label, value, unit) {
     return '<div class="stat"><span class="stat-label">' + label + '</span>' +
       '<span class="stat-value num">' + value + (unit ? '<small>' + unit + '</small>' : '') + '</span></div>';
+  }
+
+  /* サマリータイル（内容がある種類だけ表示。筋トレ=レップ/負荷量、有酸素=時間/距離）。
+     全再描画せずに数値だけ更新したいときにも呼べるよう renderLog から切り出してある */
+  function renderDayStats(w) {
+    var st = dayStats(w);
+    var tiles = statTile('合計種目数', st.ex) + statTile('合計セット数', st.sets);
+    if (st.hasStr) tiles += statTile('合計レップ数', st.reps) + statTile('合計負荷量', fmtNum(st.vol), 'kg');
+    if (st.hasCardio) tiles += statTile('合計時間', fmtNum(st.time), '分') + statTile('合計距離', fmtNum(st.dist), 'km');
+    if (!st.hasStr && !st.hasCardio) tiles += statTile('合計レップ数', 0) + statTile('合計負荷量', 0, 'kg');
+    $('#dayStats').innerHTML = tiles;
   }
 
   function renderLog(animate) {
@@ -684,13 +842,7 @@
     var memoEl = $('#dayMemo');
     if (document.activeElement !== memoEl) memoEl.value = (w && w.memo) ? w.memo : '';
 
-    // サマリータイル（内容がある種類だけ表示。筋トレ=レップ/負荷量、有酸素=時間/距離）
-    var st = dayStats(w);
-    var tiles = statTile('合計種目数', st.ex) + statTile('合計セット数', st.sets);
-    if (st.hasStr) tiles += statTile('合計レップ数', st.reps) + statTile('合計負荷量', fmtNum(st.vol), 'kg');
-    if (st.hasCardio) tiles += statTile('合計時間', fmtNum(st.time), '分') + statTile('合計距離', fmtNum(st.dist), 'km');
-    if (!st.hasStr && !st.hasCardio) tiles += statTile('合計レップ数', 0) + statTile('合計負荷量', 0, 'kg');
-    $('#dayStats').innerHTML = tiles;
+    renderDayStats(w);
 
     // 種目カード
     var entries = (w && w.entries) || [];
@@ -733,17 +885,61 @@
     var pd = parseDate(prev.date);
     var body;
     if (isCardio(e)) {
-      body = prev.sets.map(function (s) {
-        var parts = [];
-        if (+s.t) parts.push(esc(s.t) + '分');
-        if (+s.d) parts.push(esc(s.d) + 'km');
-        if (+s.cal) parts.push(esc(s.cal) + 'kcal');
-        return parts.join(' ') || '—';
-      }).join(' / ');
+      body = cardioPrevBody(prev.sets);
     } else {
       body = prev.sets.map(function (s) { return esc(s.w || 0) + '×' + esc(s.r || 0); }).join(' / ');
     }
     return '<p class="prev"><span>前回 ' + (pd.getMonth() + 1) + '/' + pd.getDate() + '</span>' + body + '</p>';
+  }
+
+  /* 前回の有酸素記録の1行表示。
+     インターバルはセッションが16個などになるため1件ずつ並べると読めなくなるので、
+     「WORK30秒/REST90秒 ×8本 計16分 9.35km」の形に要約する */
+  function cardioPrevBody(sets) {
+    var hi = [], rec = [];
+    sets.forEach(function (s) {
+      var z = zoneOf(s);
+      if (z === 'hi') hi.push(s);
+      else if (z === 'rec') rec.push(s);
+    });
+
+    if (!hi.length && !rec.length) {
+      return sets.map(function (s) {
+        var parts = [];
+        var tv = fmtCardioTime(s);
+        if (tv) parts.push(tv);
+        if (+s.d) parts.push(esc(s.d) + 'km');
+        if (+s.cal) parts.push(esc(s.cal) + 'kcal');
+        return parts.join(' ') || '—';
+      }).join(' / ');
+    }
+
+    // 全セッションが同じ長さなら秒数まで書き、まちまちなら本数だけにする（嘘の代表値を出さない）
+    var uniform = function (list) {
+      if (!list.length) return '';
+      var first = setSeconds(list[0]);
+      var same = list.every(function (s) { return setSeconds(s) === first; });
+      return (same && first > 0) ? fmtShortSec(first) : '';
+    };
+    var head = [];
+    if (hi.length) head.push(ZONES.hi.label + uniform(hi));
+    if (rec.length) head.push(ZONES.rec.label + uniform(rec));
+
+    var totSec = 0, totD = 0;
+    sets.forEach(function (s) { totSec += setSeconds(s); totD += (+s.d || 0); });
+    var tail = [];
+    if (totSec) tail.push('計' + fmtShortSec(totSec));
+    if (totD) tail.push(fmtNum(totD) + 'km');
+
+    return esc(head.join('/') + ' ×' + Math.max(hi.length, rec.length) + '本 ' + tail.join(' '));
+  }
+
+  /* 要約用。「30秒」「1分30秒」「16分」「1時間」。ちょうどの分・時間は末尾の00秒を書かない */
+  function fmtShortSec(sec) {
+    sec = Math.max(0, Math.round(sec));
+    if (sec % 60) return fmtSeconds(sec);
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    return (h ? h + '時間' : '') + ((m || !h) ? m + '分' : '');
   }
 
   /* 筋トレ種目：重量kg × 回数 */
@@ -779,40 +975,111 @@
     '</article>';
   }
 
-  /* 有酸素種目：時間・距離・速度・傾斜・カロリー・心拍 */
-  function cardioEntryHtml(e, i) {
-    var rows = e.sets.map(function (s, idx) {
-      var timeVal = fmtCardioTime(s);
-      var timeCell = '<label class="cf">' +
-        '<span class="cf-label">時間</span>' +
+  /* 有酸素の入力セル（時間ボタン＋数値5項目）。数値欄は値が入っているときだけクリアボタンを出す */
+  function cardioCells(s) {
+    var timeVal = fmtCardioTime(s);
+    var timeCell = '<label class="cf">' +
+      '<span class="cf-label">時間</span>' +
+      '<span class="cf-inputwrap">' +
+        '<button class="cf-time-btn num' + (timeVal ? '' : ' empty') + '" data-action="ctime-open" type="button">' + (timeVal || '分') + '</button>' +
+      '</span>' +
+    '</label>';
+    return timeCell + CARDIO_FIELDS.map(function (f) {
+      var isInt = f.step.indexOf('.') < 0;
+      var mode = isInt ? 'numeric' : 'decimal';
+      var patternAttr = isInt ? ' pattern="[0-9]*"' : '';
+      var filled = !(s[f.k] === '' || s[f.k] == null);
+      return '<label class="cf">' +
+        '<span class="cf-label">' + f.label + '</span>' +
         '<span class="cf-inputwrap">' +
-          '<button class="cf-time-btn num' + (timeVal ? '' : ' empty') + '" data-action="ctime-open" type="button">' + (timeVal || '分') + '</button>' +
+          '<input type="text" inputmode="' + mode + '"' + patternAttr + ' data-field="' + f.k + '" value="' + esc(s[f.k]) + '" placeholder="0">' +
+          '<button type="button" class="cf-clear' + (filled ? ' on' : '') + '" data-action="cf-clear" tabindex="-1" aria-label="' + f.label + 'を消す">✕</button>' +
+          '<span class="cf-unit">' + f.unit + '</span>' +
         '</span>' +
       '</label>';
-      var cells = timeCell + CARDIO_FIELDS.map(function (f) {
-        var isInt = f.step.indexOf('.') < 0;
-        var mode = isInt ? 'numeric' : 'decimal';
-        var patternAttr = isInt ? ' pattern="[0-9]*"' : '';
-        return '<label class="cf">' +
-          '<span class="cf-label">' + f.label + '</span>' +
-          '<span class="cf-inputwrap">' +
-            '<input type="text" inputmode="' + mode + '"' + patternAttr + ' data-field="' + f.k + '" value="' + esc(s[f.k]) + '" placeholder="0">' +
-            '<span class="cf-unit">' + f.unit + '</span>' +
-          '</span>' +
-        '</label>';
-      }).join('');
-      return '<div class="cardio-set" data-idx="' + idx + '">' +
-        '<div class="cardio-set-head">' +
-          '<span class="set-no num">' + (idx + 1) + '</span>' +
-          '<span class="cardio-set-label">セッション ' + (idx + 1) + '</span>' +
-          '<button class="set-del" data-action="del-set" aria-label="セッション削除">✕</button>' +
-        '</div>' +
-        '<div class="cardio-grid">' + cells + '</div>' +
-      '</div>';
     }).join('');
+  }
 
-    var totT = 0, totD = 0;
-    e.sets.forEach(function (s) { totT += (+s.t || 0); totD += (+s.d || 0); });
+  /* 強度チップ。タップするたび WORK → REST → タグなし と巡回する */
+  function zoneChip(z) {
+    var meta = ZONES[z];
+    return '<button type="button" class="zchip num ' + (meta ? meta.cls : 'z-none') + '" data-action="z-cycle" ' +
+      'aria-label="強度を切り替え（現在' + (meta ? meta.label : 'タグなし') + '）">' + (meta ? meta.label : '—') + '</button>';
+  }
+
+  /* コンパクト行の右側に出す補足。入力済みのものだけを最大3つまで */
+  function lapSub(s) {
+    var p = [];
+    if (+s.sp) p.push(fmtNum(s.sp) + ' km/h');
+    if (+s.d) p.push(fmtNum(s.d) + ' km');
+    if (+s.hr) p.push(esc(s.hr) + ' bpm');
+    if (+s.inc) p.push(esc(s.inc) + ' %');
+    if (+s.cal) p.push(esc(s.cal) + ' kcal');
+    return p.slice(0, 3).join(' · ');
+  }
+
+  /* 強度タグ付きセッション＝1行のコンパクト表示。タップしたものだけ全項目を開く */
+  function lapHtml(e, s, idx) {
+    var open = !!ui.lapOpen[e.id + '/' + idx];
+    var timeVal = fmtCardioTime(s);
+    var row = '<div class="lap' + (open ? ' open' : '') + '" data-idx="' + idx + '" data-action="lap-toggle">' +
+      '<span class="lap-n num">' + (idx + 1) + '</span>' +
+      zoneChip(zoneOf(s)) +
+      '<span class="lap-t num' + (timeVal ? '' : ' empty') + '">' + (timeVal || '—') + '</span>' +
+      '<span class="lap-sub">' + lapSub(s) + '</span>' +
+      '<span class="lap-caret">' + (open ? '▲' : '▼') + '</span>' +
+    '</div>';
+    if (!open) return row;
+    return row + '<div class="lap-body" data-idx="' + idx + '">' +
+      '<div class="cardio-grid">' + cardioCells(s) + '</div>' +
+      '<button class="link danger lap-del" type="button" data-action="del-set">このセッションを削除</button>' +
+    '</div>';
+  }
+
+  /* 強度タグなしのセッション＝従来どおり全項目を並べたカード */
+  function cardioSetHtml(e, s, idx) {
+    return '<div class="cardio-set" data-idx="' + idx + '">' +
+      '<div class="cardio-set-head">' +
+        '<span class="set-no num">' + (idx + 1) + '</span>' +
+        zoneChip(zoneOf(s)) +
+        '<span class="cardio-set-label">セッション ' + (idx + 1) + '</span>' +
+        '<button class="set-del" data-action="del-set" aria-label="セッション削除">✕</button>' +
+      '</div>' +
+      '<div class="cardio-grid">' + cardioCells(s) + '</div>' +
+    '</div>';
+  }
+
+  /* カード下部に出す合計。強度別の内訳もここで作る */
+  function cardioTotals(e) {
+    var t = { sec: 0, dist: 0, hi: { n: 0, sec: 0 }, rec: { n: 0, sec: 0 } };
+    e.sets.forEach(function (s) {
+      var sec = setSeconds(s);
+      t.sec += sec;
+      t.dist += (+s.d || 0);
+      var z = zoneOf(s);
+      if (z === 'hi') { t.hi.n++; t.hi.sec += sec; }
+      else if (z === 'rec') { t.rec.n++; t.rec.sec += sec; }
+    });
+    return t;
+  }
+  function cardioTotalHtml(t) {
+    return '計 <b class="num">' + fmtNum(t.sec / 60) + '</b>分 · <b class="num">' + fmtNum(t.dist) + '</b>km';
+  }
+  function zoneSumHtml(t) {
+    if (!t.hi.n && !t.rec.n) return '';
+    var one = function (z, d) {
+      if (!d.n) return '';
+      return '<span class="' + ZONES[z].cls + '"><i>' + ZONES[z].label + '</i> ' + d.n + '本 ' + fmtSeconds(d.sec) + '</span>';
+    };
+    return '<div class="zsum">' + one('hi', t.hi) + one('rec', t.rec) + '</div>';
+  }
+
+  /* 有酸素種目：時間・距離・速度・傾斜・カロリー・心拍。強度タグ付きは1行に畳む */
+  function cardioEntryHtml(e, i) {
+    var rows = e.sets.map(function (s, idx) {
+      return zoneOf(s) ? lapHtml(e, s, idx) : cardioSetHtml(e, s, idx);
+    }).join('');
+    var t = cardioTotals(e);
 
     return '<article class="entry" data-entry="' + e.id + '" style="animation-delay:' + Math.min(i * 50, 300) + 'ms">' +
       entryHead(e) +
@@ -820,8 +1087,10 @@
       '<div class="sets cardio-sets">' + rows + '</div>' +
       '<div class="entry-foot">' +
         '<button class="btn ghost small" data-action="add-set">＋ セッション追加</button>' +
-        '<span class="vol">計 <b class="num">' + fmtNum(totT) + '</b>分 · <b class="num">' + fmtNum(totD) + '</b>km</span>' +
+        '<button class="btn-interval" data-action="gen-open" type="button">⚡ インターバル</button>' +
+        '<span class="vol">' + cardioTotalHtml(t) + '</span>' +
       '</div>' +
+      zoneSumHtml(t) +
     '</article>';
   }
 
@@ -951,7 +1220,28 @@
         renderLog();
       } else if (a === 'del-set') {
         DB.removeSet(ui.date, id, idx);
+        // 削除で以降の番号が1つずつ繰り上がるため、開いていた行の記憶は捨てる（別の行が開くのを防ぐ）
+        Object.keys(ui.lapOpen).forEach(function (key) {
+          if (key.indexOf(id + '/') === 0) delete ui.lapOpen[key];
+        });
         renderLog();
+      } else if (a === 'z-cycle') {
+        var cur = ZONE_ORDER.indexOf(zoneOf(DB.getSet(ui.date, id, idx) || {}));
+        var next = ZONE_ORDER[(cur + 1) % ZONE_ORDER.length];
+        DB.updateSet(ui.date, id, idx, 'z', next);
+        // タグを外すと1行表示から通常カードに戻るので、開いた状態は持ち越さない
+        if (!next) delete ui.lapOpen[id + '/' + idx];
+        renderLog();
+      } else if (a === 'lap-toggle') {
+        var key = id + '/' + idx;
+        if (ui.lapOpen[key]) delete ui.lapOpen[key];
+        else ui.lapOpen[key] = true;
+        renderLog();
+      } else if (a === 'gen-open') {
+        openGen(id);
+      } else if (a === 'cf-clear') {
+        // 実処理は pointerdown 側（フォーカスを外さないため）。ここでは何もしない
+        return;
       } else if (a === 'w-' || a === 'w+' || a === 'r-' || a === 'r+') {
         var field = (a.charAt(0) === 'w') ? 'w' : 'r';
         var delta = (a.charAt(1) === '+' ? 1 : -1) * (field === 'w' ? weightStepSettings.step : 1);
@@ -964,7 +1254,49 @@
       }
     });
 
-    // 直接入力（blur時に保存）
+    /* 数値欄をタップしたらカーソルを末尾に置く。
+       focus だけでは効かない：iOS Safari は focus のあとに「タップした位置」へカーソルを置き直すため、
+       pointerup 後にもう一度末尾へ寄せる。範囲選択中（ドラッグで選んだ）は動かさない */
+    function caretToEnd(input) {
+      if (input.selectionStart !== input.selectionEnd) return;
+      var n = input.value.length;
+      try { input.setSelectionRange(n, n); } catch (err) { /* type次第で失敗するが実害なし */ }
+    }
+    $('#entries').addEventListener('focusin', function (e) {
+      var input = e.target.closest('input[data-field]');
+      if (input) caretToEnd(input);
+    });
+    $('#entries').addEventListener('pointerup', function (e) {
+      var input = e.target.closest('input[data-field]');
+      if (!input) return;
+      setTimeout(function () {
+        if (document.activeElement === input) caretToEnd(input);
+      }, 0);
+    });
+
+    /* ✕（クリア）は pointerdown で処理する。
+       click まで待つと先に input が blur → change → renderLog が走り、
+       押した対象のDOMごと作り替わってしまうため */
+    $('#entries').addEventListener('pointerdown', function (e) {
+      var btn = e.target.closest('[data-action="cf-clear"]');
+      if (!btn) return;
+      e.preventDefault();          // フォーカスを移動させない＝キーボードを閉じない
+      var input = btn.parentNode.querySelector('input[data-field]');
+      var entryEl = btn.closest('.entry');
+      var rowEl = btn.closest('[data-idx]');
+      if (!input || !entryEl || !rowEl) return;
+      input.value = '';
+      btn.classList.remove('on');
+      DB.updateSet(ui.date, entryEl.dataset.entry, +rowEl.dataset.idx, input.dataset.field, '');
+      refreshCardio(entryEl, +rowEl.dataset.idx);
+      if (document.activeElement !== input) input.focus();
+    });
+
+    /* 直接入力（blur時に保存）。
+       ここで renderLog() を呼んではいけない：#entries が丸ごと作り替わるため、
+       「速度を入れて、そのまま心拍の欄をタップする」と、指が触れた瞬間に前の欄のblur→再描画が走り、
+       タップ先の要素が消えて入力が1つ丸ごと失われる（有酸素だけがテキスト入力なので有酸素だけで起きる）。
+       必要な箇所（値の正規化・クリアボタン・合計・行の要約・サマリータイル）だけを書き換える */
     $('#entries').addEventListener('change', function (e) {
       var input = e.target.closest('input[data-field]');
       if (!input) return;
@@ -974,8 +1306,40 @@
       var v = (input.value === '') ? '' : Math.max(0, parseFloat(input.value) || 0);
       DB.updateSet(ui.date, entryEl.dataset.entry, +rowEl.dataset.idx, input.dataset.field, v);
       checkRecordToast(entryEl.dataset.entry);
-      renderLog();
+      // 「5.30」→「5.3」、「-3」→「0」のように、保存された値を表示にも反映する（従来は再描画が担っていた）
+      input.value = (v === '') ? '' : String(v);
+      var clearBtn = input.parentNode.querySelector('.cf-clear');
+      if (clearBtn) clearBtn.classList.toggle('on', v !== '');
+      refreshCardio(entryEl, +rowEl.dataset.idx);
     });
+  }
+
+  /* 入力中に全再描画せず、値に連動する表示だけをその場で書き換える */
+  function refreshCardio(entryEl, idx) {
+    var w = DB.getWorkout(ui.date);
+    renderDayStats(w);
+    var e = ((w && w.entries) || []).filter(function (x) { return x.id === entryEl.dataset.entry; })[0];
+    if (!e || !isCardio(e)) return;
+    var t = cardioTotals(e);
+
+    var vol = entryEl.querySelector('.entry-foot .vol');
+    if (vol) vol.innerHTML = cardioTotalHtml(t);
+
+    var zs = entryEl.querySelector('.zsum');
+    var zsHtml = zoneSumHtml(t);
+    if (zs && zsHtml) zs.outerHTML = zsHtml;
+    else if (zs) zs.parentNode.removeChild(zs);
+    else if (zsHtml) entryEl.insertAdjacentHTML('beforeend', zsHtml);
+
+    var s = e.sets[idx];
+    var lap = entryEl.querySelector('.lap[data-idx="' + idx + '"]');
+    if (s && lap) {
+      var tv = fmtCardioTime(s);
+      var tEl = lap.querySelector('.lap-t');
+      if (tEl) { tEl.textContent = tv || '—'; tEl.classList.toggle('empty', !tv); }
+      var subEl = lap.querySelector('.lap-sub');
+      if (subEl) subEl.innerHTML = lapSub(s);
+    }
   }
 
   /* ================== 種目選択シート ================== */
@@ -1203,20 +1567,13 @@
 
   function hBodyHtml(w) {
     var rows = (w.entries || []).map(function (e) {
-      var setsStr;
-      if (isCardio(e)) {
-        setsStr = e.sets.map(function (s) {
-          var parts = [];
-          if (+s.t) parts.push(s.t + '分');
-          if (+s.d) parts.push(s.d + 'km');
-          if (+s.cal) parts.push(s.cal + 'kcal');
-          return parts.join(' ') || '—';
-        }).join(' / ') || '—';
-      } else {
-        setsStr = e.sets.map(function (s) { return (s.w || 0) + '×' + (s.r || 0); }).join(' / ') || '—';
-      }
+      // 有酸素は記録カードの前回行と同じ要約（cardioPrevBody）を使う。
+      // インターバルだと16セッションが並んで読めなくなるうえ、分(t)だけ見ると30秒が0分と出てしまうため
+      var setsHtml = isCardio(e)
+        ? (cardioPrevBody(e.sets) || '—')
+        : esc(e.sets.map(function (s) { return (s.w || 0) + '×' + (s.r || 0); }).join(' / ') || '—');
       return '<div class="h-entry">' + partChip(e.part) + '<b>' + esc(e.name) + '</b>' + equipTag(e.equip) +
-        '<span class="h-sets">' + esc(setsStr) + '</span></div>';
+        '<span class="h-sets">' + setsHtml + '</span></div>';
     }).join('');
     return '<div class="h-body">' + rows +
       (w.memo ? '<p class="h-memo">' + esc(w.memo) + '</p>' : '') +
@@ -1725,10 +2082,11 @@
   }
 
   /* ================== CSVエクスポート・スプレッドシート同期 共通の行データ ================== */
+  /* 強度(v0.10.0で追加)は末尾に足す。途中に挿すとスプレッドシートに既に書かれた行と列がずれるため */
   var ROW_HEAD = ['日付', '曜日', '部位', '種目', '器具', 'セット',
     '重量kg', '回数', 'ボリュームkg',
-    '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ'];
-  /* 指定日の記録を17列の行配列（ROW_HEADと同じ並び）に変換する。記録が無ければ空配列 */
+    '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ', '強度'];
+  /* 指定日の記録を18列の行配列（ROW_HEADと同じ並び）に変換する。記録が無ければ空配列 */
   function rowsForDate(date) {
     var w = DB.getWorkout(date);
     if (!w) return [];
@@ -1750,7 +2108,8 @@
           cardio ? val(s.inc) : '',
           cardio ? val(s.cal) : '',
           cardio ? val(s.hr) : '',
-          w.memo || ''
+          w.memo || '',
+          cardio ? zoneCsv(zoneOf(s)) : ''
         ]);
       });
     });
@@ -1781,7 +2140,7 @@
   /* ================== CSVインポート ================== */
   /* ROW_HEADの見出し文字列 → 内部キー。列の並びが変わっていてもヘッダー名で判定する */
   var IMPORT_KEYS = ['date', 'wd', 'part', 'name', 'equip', 'setNo',
-    'w', 'r', 'vol', 't', 'ts', 'd', 'sp', 'inc', 'cal', 'hr', 'memo'];
+    'w', 'r', 'vol', 't', 'ts', 'd', 'sp', 'inc', 'cal', 'hr', 'memo', 'z'];
   var IMPORT_HEADER_KEY = ROW_HEAD.reduce(function (m, h, i) { m[h] = IMPORT_KEYS[i]; return m; }, {});
   var PREIMPORT_BACKUP_KEY = 'kintore_v1_preimport_backup';
 
@@ -1844,7 +2203,7 @@
       var setNo = parseInt(rec.setNo, 10);
       if (!setNo || setNo < 1) setNo = entryObj.sets.length + 1;
       var setObj = (rec.part === CARDIO_PART)
-        ? { t: numOrEmpty(rec.t), ts: numOrEmpty(rec.ts), d: numOrEmpty(rec.d), sp: numOrEmpty(rec.sp), inc: numOrEmpty(rec.inc), cal: numOrEmpty(rec.cal), hr: numOrEmpty(rec.hr) }
+        ? { t: numOrEmpty(rec.t), ts: numOrEmpty(rec.ts), d: numOrEmpty(rec.d), sp: numOrEmpty(rec.sp), inc: numOrEmpty(rec.inc), cal: numOrEmpty(rec.cal), hr: numOrEmpty(rec.hr), z: zoneFromCsv(rec.z) }
         : { w: numOrEmpty(rec.w), r: numOrEmpty(rec.r) };
       entryObj.sets[setNo - 1] = setObj;
     }
@@ -2564,6 +2923,7 @@
   bindExInfo();
   bindDrum();
   bindCtime();
+  bindGen();
   bindRepsDrum();
   loadTimerSettings();
   bindTimerSettingsOnce();
