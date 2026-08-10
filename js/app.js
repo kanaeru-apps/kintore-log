@@ -293,6 +293,76 @@
     try { localStorage.setItem('kintore_weight_step', String(weightStepSettings.step)); } catch (e) { /* noop */ }
   }
 
+  /* ================== 外観（ライト / ダーク） ==================
+     端末に保存するのはユーザーの選択（system / light / dark）だけ。実際に適用したほうは
+     <html data-theme="light|dark"> に入れ、CSSはこの2値しか見ない（style.css の :root を参照）。
+     起動直後のちらつき（ダークが一瞬見えてからライトになる）を防ぐため、属性の初期設定は
+     index.html の <head> のインラインスクリプトでも先に行っている。同じキーを読むので、
+     キー名や既定値を変えるときは必ず両方を直すこと。 */
+  var THEME_KEY = 'kintore_theme';
+  var THEME_OPTIONS = ['system', 'light', 'dark'];
+  var themePref = 'system';
+
+  function loadThemePref() {
+    try {
+      var v = localStorage.getItem(THEME_KEY);
+      if (THEME_OPTIONS.indexOf(v) !== -1) themePref = v;
+    } catch (e) { /* noop */ }
+  }
+  function systemTheme() {
+    try {
+      return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+    } catch (e) { return 'dark'; }   /* 判定できない環境は従来どおりダーク */
+  }
+  /* 選択をアプリ全体に反映する。<html> の属性を差し替えたあと、JSが色を直接書き込んでいる
+     場所（履歴カレンダーの塗り・グラフのSVG）を描き直す。CSS変数だけで色が決まる部分は
+     属性の切り替えだけで自動的に変わる */
+  function applyTheme() {
+    var actual = themePref === 'system' ? systemTheme() : themePref;
+    document.documentElement.setAttribute('data-theme', actual);
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', DB.cssVar('--bg', actual === 'light' ? '#f2f3f5' : '#0b0c0f'));
+    DB.refreshThemeColors();
+    if (ui.tab === 'history') renderHistory();
+    else if (ui.tab === 'charts') Charts.init();
+  }
+  function setThemePref(v) {
+    if (THEME_OPTIONS.indexOf(v) === -1) return;
+    themePref = v;
+    try { localStorage.setItem(THEME_KEY, v); } catch (e) { /* noop */ }
+    applyTheme();
+    renderThemeSettings();
+  }
+  function initTheme() {
+    loadThemePref();
+    applyTheme();
+    /* 「システム」の間はOS側の切り替え（時間帯による自動切替を含む）に追従する */
+    try {
+      var mq = window.matchMedia('(prefers-color-scheme: light)');
+      var onChange = function () {
+        if (themePref !== 'system') return;
+        applyTheme();
+        renderThemeSettings();
+      };
+      if (mq.addEventListener) mq.addEventListener('change', onChange);
+      else if (mq.addListener) mq.addListener(onChange);   /* iOS 13 など旧Safari */
+    } catch (e) { /* 追従できなくても手動選択は動く */ }
+  }
+  function renderThemeSettings() {
+    var box = $('#themeSeg');
+    if (!box) return;
+    $$('#themeSeg [data-theme-opt]').forEach(function (b) {
+      var on = b.dataset.themeOpt === themePref;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    var note = $('#themeNote');
+    if (!note) return;
+    note.textContent = themePref === 'system'
+      ? '端末の設定に合わせて自動で切り替わります（今は' + (systemTheme() === 'light' ? 'ライト' : 'ダーク') + '）'
+      : (themePref === 'light' ? 'いつもライトで表示します' : 'いつもダークで表示します');
+  }
+
   /* ================== 重量ドラムロールピッカー ================== */
   var DRUM_STEP = 0.25;     // 0.25kg刻み（0.5/1.25/2.5kgなど主要なプレート単位すべてにピッタリ止まれる）
   var DRUM_MAX = 300;       // 最大300kg
@@ -1575,8 +1645,7 @@
      v0.11.0でグラフタブから移設した。ここで選んだ「日」と「部位」が、
      そのまま下の履歴一覧の絞り込みも兼ねる（カレンダーは見るだけのものではなくなった） */
   var HIST_CAL_OPEN_KEY = 'kintore_hist_cal_open';
-  var VOLT = '#d7ff3e';
-  var histCal = { part: 'ALL', year: null, month: null, date: null, open: true };
+  var histCal ={ part: 'ALL', year: null, month: null, date: null, open: true };
   (function initHistCal() {
     var t = parseDate(DB.todayStr());
     histCal.year = t.getFullYear();
@@ -1620,7 +1689,11 @@
     var daysInMonth = new Date(y, m + 1, 0).getDate();
     var prevDays = new Date(y, m, 0).getDate();
     var info = histDayInfo(histCal.part);
-    var color = histCal.part === 'ALL' ? VOLT : (DB.PART_COLOR[histCal.part] || VOLT);
+    /* 塗りの色はテーマで変わるのでCSS変数から読む。ALLは既定のボルトイエロー、部位選択中はその部位の色 */
+    var volt = DB.cssVar('--volt', '#d7ff3e');
+    var color = histCal.part === 'ALL' ? volt : (DB.PART_COLOR[histCal.part] || volt);
+    /* ライトテーマの部位カラーは濃い色なので、塗った日の数字は白に反転させないと読めない */
+    var onColor = DB.textOn(color);
     var today = DB.todayStr();
 
     var cells = '';
@@ -1630,7 +1703,7 @@
     for (var d = 1; d <= daysInMonth; d++) {
       var ds = y + '-' + ('0' + (m + 1)).slice(-2) + '-' + ('0' + d).slice(-2);
       var cls = 'cal-day', style = '';
-      if (info.trained[ds]) { cls += ' trained'; style = ' style="background:' + color + ';border-color:' + color + '"'; }
+      if (info.trained[ds]) { cls += ' trained'; style = ' style="background:' + color + ';border-color:' + color + ';color:' + onColor + '"'; }
       else if (info.has[ds]) { cls += ' has-rec'; style = ' style="--dot-color:' + color + '"'; }
       if (ds === today) cls += ' today';
       if (ds === histCal.date) cls += ' sel';
@@ -1842,6 +1915,7 @@
     renderStorageSection();
     renderSyncSection();
     renderWeightStepSettings();
+    renderThemeSettings();
   }
 
   /* ================== 記録：重量±ボタンの刻み幅設定 ================== */
@@ -2377,6 +2451,12 @@
       weightStepSettings.step = parseFloat(row.dataset.wstep);
       saveWeightStepSettings();
       renderWeightStepSettings();
+    });
+
+    $('#themeSeg').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-theme-opt]');
+      if (!b) return;
+      setThemePref(b.dataset.themeOpt);
     });
 
     $('#addExBtn').onclick = function () {
@@ -3329,6 +3409,7 @@
   loadTimerSettings();
   bindTimerSettingsOnce();
   loadWeightStepSettings();
+  initTheme();
   renderLog(true);
 
   // 機種変更・再インストール後の初回起動なら、端末内バックアップから記録を読み戻す

@@ -17,7 +17,26 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.11.1">
+<link rel="stylesheet" href="css/style.css?v=0.12.0">
+<!-- テーマの初期設定。CSSより先に <html data-theme> を決めておかないと、起動の一瞬だけ
+     ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
+     揃えること（片方だけ変えるとちらつきが戻る） -->
+<script>
+(function () {
+  var pref = 'system';
+  try {
+    var v = localStorage.getItem('kintore_theme');
+    if (v === 'system' || v === 'light' || v === 'dark') pref = v;
+  } catch (e) { /* プライベートモード等で読めなくても既定で動く */ }
+  var actual = pref;
+  if (pref === 'system') {
+    actual = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+  }
+  document.documentElement.setAttribute('data-theme', actual);
+  var m = document.querySelector('meta[name="theme-color"]');
+  if (m) m.setAttribute('content', actual === 'light' ? '#f2f3f5' : '#0b0c0f');
+})();
+</script>
 </head>
 <body>
 <div id="app">
@@ -170,6 +189,16 @@
       <header class="page-header"><p class="eyebrow">SETTINGS</p><h2>設定</h2></header>
 
       <div class="s-section">
+        <h4 class="s-title">外観</h4>
+        <div class="theme-seg" id="themeSeg" role="group" aria-label="テーマ">
+          <button type="button" class="theme-opt" data-theme-opt="system">システム</button>
+          <button type="button" class="theme-opt" data-theme-opt="light">ライト</button>
+          <button type="button" class="theme-opt" data-theme-opt="dark">ダーク</button>
+        </div>
+        <p class="theme-note" id="themeNote"></p>
+      </div>
+
+      <div class="s-section">
         <h4 class="s-title">種目管理</h4>
         <div class="add-ex-form">
           <input id="newExName" type="text" placeholder="新しい種目名">
@@ -259,7 +288,7 @@
 
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレ記録 v0.11.1 — Phase 7</p>
+      <p class="version">筋トレ記録 v0.12.0 — Phase 8</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -508,9 +537,9 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.11.1"></script>
-<script src="js/app.js?v=0.11.1"></script>
-<script src="js/charts.js?v=0.11.1"></script>
+<script src="js/db.js?v=0.12.0"></script>
+<script src="js/app.js?v=0.12.0"></script>
+<script src="js/charts.js?v=0.12.0"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});

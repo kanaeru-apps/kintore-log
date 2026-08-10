@@ -8,7 +8,9 @@ var Charts = (function () {
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
 
-  var VOLT = '#d7ff3e';
+  /* グラフの線・棒の色。ライトテーマではボルトイエローが白地で読めないため、
+     描画のたびに CSS変数（--accent）から今のテーマの値を読む */
+  function volt() { return DB.cssVar('--accent', '#d7ff3e'); }
   var PART_COLOR = DB.PART_COLOR;  /* 配色の実体は db.js（app.js のカレンダーと共用するため） */
 
   var state = { cardTab: 'exercise', part: null, exId: null, bound: false };
@@ -190,13 +192,14 @@ var Charts = (function () {
     var maxV = Math.max.apply(null, points.map(function (p) { return p.value; }).concat([0])) || 1;
     var slot = IW / n;
     var barW = Math.min(28, slot * 0.6);
+    var fill = volt();   /* 棒ごとに getComputedStyle を呼ばないよう、描画の頭で1回だけ読む */
 
     var bars = points.map(function (p, i) {
       var h = (p.value / maxV) * IH;
       var x = PL + slot * i + (slot - barW) / 2;
       var y = PT + IH - h;
       var label = p.value > 0 ? '<text class="chart-value-label" text-anchor="middle" x="' + (x + barW / 2).toFixed(1) + '" y="' + Math.max(10, y - 6).toFixed(1) + '">' + fmt1(p.value) + '</text>' : '';
-      return '<rect class="chart-bar-seg" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + Math.max(0, h).toFixed(1) + '" rx="3" fill="' + VOLT + '"/>' + label;
+      return '<rect class="chart-bar-seg" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + Math.max(0, h).toFixed(1) + '" rx="3" fill="' + fill + '"/>' + label;
     }).join('');
     var xLabels = points.map(function (p, i) {
       var x = PL + slot * i + slot / 2;

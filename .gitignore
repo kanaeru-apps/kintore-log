@@ -12,6 +12,9 @@ Desktop.ini
 *.log
 scratchpad/
 
+# デザイン検討用のプレビュー（アプリ本体ではないので GitHub Pages に載せない）
+design-preview/
+
 # ===== App Store版（Phase 7）のビルド関連 =====
 # Node
 node_modules/

@@ -11,11 +11,54 @@ var DB = (function () {
   var PARTS = ['胸', '背中', '脚', '肩', '腕', '腹', '有酸素', 'その他'];
   /* 記録画面の部位チップ（.p-xxx）と同じ配色。グラフの線色とカレンダーの塗りで共用する。
      app.js と charts.js の両方が使うため、部位の情報を持つここに置く（2か所にコピーすると
-     色を変えたとき片方だけ直す事故になる）。有酸素はキーを持たず、使う側でボルトイエローに落ちる */
+     色を変えたとき片方だけ直す事故になる）。有酸素はキーを持たず、使う側でボルトイエローに落ちる。
+     配色の実体は style.css の CSS変数で、ここはその写し。ライト/ダークで値が変わるので、
+     テーマを切り替えたら refreshThemeColors() で中身を入れ替える */
+  var PART_VAR = {
+    '胸': '--p-chest', '背中': '--p-back', '脚': '--p-leg', '肩': '--p-shoulder',
+    '腕': '--p-arm', '腹': '--p-core', 'その他': '--p-etc'
+  };
+  /* CSSが読めなかったときのフォールバック（ダークテーマの値） */
   var PART_COLOR = {
     '胸': '#ff8484', '背中': '#74b6ff', '脚': '#ffbc57', '肩': '#c9a4ff',
     '腕': '#62e3cb', '腹': '#ff9ec4', 'その他': '#9ba0a8'
   };
+
+  /* CSS変数の実際の値を読む。JS側で色を決める場所（グラフのSVG・カレンダーの塗り）は
+     必ずここを通し、色の正本を style.css の1か所に保つ */
+  function cssVar(name, fallback) {
+    var v = '';
+    try {
+      v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    } catch (e) { /* 参照できなければフォールバックを返す */ }
+    return v || fallback || '';
+  }
+  /* テーマ切替後に呼ぶ。PART_COLOR は中身だけ差し替える
+     （オブジェクトごと作り直すと、起動時に参照を掴んでいる charts.js が古い色を見続ける） */
+  function refreshThemeColors() {
+    Object.keys(PART_VAR).forEach(function (p) {
+      PART_COLOR[p] = cssVar(PART_VAR[p], PART_COLOR[p]);
+    });
+  }
+
+  /* 相対輝度（WCAG 2.1）。#rgb / #rrggbb を受け取る */
+  function relLum(hex) {
+    var h = String(hex || '').trim().replace('#', '');
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) return 0;
+    var c = [0, 2, 4].map(function (i) {
+      var v = parseInt(h.slice(i, i + 2), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+  /* 色で塗った面の上に載せる文字色を、黒と白のうちコントラストが高い方から選ぶ。
+     部位カラーはテーマで明暗が逆転する（ダーク=淡い色／ライト=濃い色）ので、
+     カレンダーの塗りつぶし日のように文字を重ねる場所は固定色にできない */
+  function textOn(bg) {
+    var l = relLum(bg);
+    return (l + 0.05) / 0.05 >= 1.05 / (l + 0.05) ? cssVar('--ink', '#0b0c0f') : '#ffffff';
+  }
   var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重'];
   var CARDIO_PART = '有酸素';
   /* 有酸素セットのフィールド：時間(t/分)・秒(ts/0-59)・距離(d/km)・速度(sp/km/h)・傾斜(inc/%)・カロリー(cal/kcal)・心拍(hr/bpm)
@@ -281,6 +324,9 @@ var DB = (function () {
     PART_COLOR: PART_COLOR,
     EQUIPS: EQUIPS,
     todayStr: todayStr,
+    cssVar: cssVar,
+    refreshThemeColors: refreshThemeColors,
+    textOn: textOn,
 
     /* ---- 種目マスタ ---- */
     getExercises: function () { return state.exercises.slice(); },
