@@ -372,7 +372,7 @@ PWA版（`kanaeru-apps.github.io/kintore-log/`）は**今のまま残し、自�
 | スクリーンショット | 未作成 | 6.9インチ・6.5インチ必須。記録／履歴カレンダー／グラフ／タイマーの4枚 |
 | Review Notes | 未作成 | 下記 |
 
-**公開URL**（GitHub Pages。リポジトリ直下に置いたのでそのまま配信される）
+**公開URL**（GitHub Pages。リポジトリ直下に置いたのでそのまま配信される。**2026-08-10 に実際に開けることを確認済み**）
 - プライバシーポリシー：`https://kanaeru-apps.github.io/kintore-log/privacy-policy.html`
 - サポート：`https://kanaeru-apps.github.io/kintore-log/support.html`
 
