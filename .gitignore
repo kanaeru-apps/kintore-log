@@ -11,3 +11,27 @@ Desktop.ini
 *.tmp
 *.log
 scratchpad/
+
+# ===== App Store版（Phase 7）のビルド関連 =====
+# Node
+node_modules/
+
+# www/ は build-ios.js がリポジトリ直下のソースから生成する成果物。
+# GitHub Pages が配信するのはリポジトリ直下の index.html なので、www/ は追跡しない
+# （Codemagic 側ではビルド時に node build-ios.js を実行して生成する）
+www/
+
+# Capacitor iOS のビルド生成物（npx cap sync ios で www から再生成される）
+ios/App/App/public/
+ios/App/Pods/
+ios/App/output/
+ios/DerivedData/
+ios/App/App/capacitor.config.json
+# Package.swift は "DO NOT MODIFY - managed by Capacitor CLI" の生成ファイル。
+# Windowsで cap sync するとパス区切りが \ になり macOS ビルドで壊れるため追跡しない
+# （Codemagic の cap sync が macOS 上で正しい / 区切りで毎回生成する）
+ios/App/CapApp-SPM/Package.swift
+
+# Xcode
+xcuserdata/
+*.xcuserstate

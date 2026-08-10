@@ -1,0 +1,52 @@
+workflows:
+  ios-workflow:
+    name: Kintore Log iOS Workflow
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      # Codemagic の「Settings > Integrations > Developer Portal」で
+      # API キーを登録した際につけた名前をここに指定する
+      app_store_connect: Codemagic
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.kanaeru.kintore
+      vars:
+        XCODE_PROJECT: "ios/App/App.xcodeproj"
+        XCODE_SCHEME: "App"
+      node: latest
+      xcode: latest
+    scripts:
+      - name: Install npm dependencies
+        script: npm install
+      # PWA版のソースから www/ を生成する。この中でクラウド同期（GAS連携）が
+      # スタブに差し替えられ、混入チェックに引っかかるとここでビルドが止まる
+      - name: Build web assets (strip cloud sync)
+        script: node build-ios.js
+      # Package.swift は Windows 側で生成するとパス区切りが壊れるため追跡していない。
+      # この cap sync が macOS 上で正しい形に再生成する
+      - name: Sync Capacitor iOS project
+        script: npx cap sync ios
+      - name: Set up code signing
+        script: xcode-project use-profiles
+      - name: Increment build number
+        script: |
+          cd "$CM_BUILD_DIR/ios/App"
+          agvtool new-version -all "$BUILD_NUMBER"
+      - name: Build ipa for distribution
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        # ビルドは App Store Connect にアップロードされ、内部テスト(審査不要)で
+        # 即利用可能。submit_to_testflight は「外部テスト審査」への提出を意味し、
+        # 前ビルドが審査中だと毎回失敗して赤いエラーになるため false にしている。
+        # 外部テスターに配布したくなったら true に戻す。
+        submit_to_testflight: false
+        # 本申請する段階になったら submit_to_app_store: true に変更する

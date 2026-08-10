@@ -1,0 +1,8 @@
+{
+  "appId": "com.kanaeru.kintore",
+  "appName": "筋トレ記録",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never"
+  }
+}

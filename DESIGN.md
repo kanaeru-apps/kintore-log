@@ -246,6 +246,247 @@ iPhoneで使う筋トレ記録アプリ。**PWA（Webアプリ）方式**で完�
   - **対策**：バーは「すべて表示」ボタン1つだけにして中央寄せ。絞り込み中（日付選択中 または 部位がALL以外）のときだけ出す点は変更なし。`.hfb-*` のCSSは削除
   - **検証**：Playwright 45項目（バーの中身が「すべて表示」だけ／ボタンが中央にある／部位だけの絞り込みでもバーが出る／月送りしてもバーが残る）＋既存51項目も通過
 
+---
+
+- [ ] **Phase 7：App Store公開（要件定義 2026-08-10・実装未着手）**
+
+### 7-1. 方針と全体像
+
+PWA版（`kanaeru-apps.github.io/kintore-log/`）は**今のまま残し、自分専用ツールとして使い続ける**。App Store版はそこから分岐した「一般ユーザー向けの別ライン」として作る。両者はデータを共有しない。
+
+| | PWA版（現行・自分用） | App Store版 v1.0 | App Store版 v1.1 |
+|---|---|---|---|
+| 配布 | GitHub Pages | App Store | App Store |
+| データ保存 | localStorage | localStorage＋Documents書き出し | 同左 |
+| クラウド同期 | GAS Web App（URL手入力） | **なし** | Googleログイン＋Sheets API |
+| タイマー通知 | 画面ロック中は鳴らない | **ローカル通知で鳴る** | 同左 |
+
+**v1.0で同期を載せない理由**（2026-08-10 ユーザー決定）：GAS方式は「自分でGASプロジェクトを作ってデプロイしてURLを貼る」という手順が必要で、一般ユーザーには使えない。かといって「上級者向け」として畳んで載せると、App Store説明文・Review Notes・アプリ内警告文の3か所に説明を書く必要が出る（ガイドライン2.3.1が hidden / undocumented features を禁じているため）。**その説明コストはv1.1のGoogleログイン導入で全部消える**ので、暫定的に説明を書くより、v1.0では同期そのものを外して確実に審査を通し、公開を最優先する。
+
+### 7-2. v1.0 のスコープ
+
+**入れるもの**
+- 現行アプリの全機能（記録・履歴・グラフ・タイマー・計算機・設定）
+- **iCloudバックアップ対応**（7-3）
+- **ローカル通知**（7-4）
+- ご意見・ご要望フォーム（現行のまま。ユーザーサポート窓口として残す）
+- CSVエクスポート／インポート（既存。手動バックアップ手段として重要）
+
+**外すもの**
+- **クラウド同期セクション一式**（GAS URL入力欄・自動送信・復元）
+
+**決定済み事項**
+
+| 項目 | 決定 | 決定日 |
+|---|---|---|
+| Bundle ID | `com.kanaeru.kintore` | 2026-08-09 |
+| アプリ名 | **未決定**（申請直前に決める。App Store Connect のアプリ作成時に必要） | — |
+| 4.2対策 | ローカル通知（**タイマーのバックグラウンド通知のみ**。休養日リマインダーは不採用＝7-4） | 2026-08-09 / 2026-08-10修正 |
+| 収益化 | 無料。将来的に広告を検討（v1.0では広告SDKを入れない＝App Privacy申告が単純になる） | 2026-08-09 |
+| v1.0の同期 | なし | 2026-08-10 |
+| 販売者名 | 個人名義のまま（本名表示を許容と決定済み・[[project-anonymization]]） | 2026-08-04 |
+| ビルド | Capacitor＋Codemagic（`ツール_無音カメラ` の構成を流用） | 2026-08-09 |
+
+### 7-3. データ保存とiCloudバックアップ
+
+**課題**：現行アプリのデータは localStorage にある。Capacitor（WKWebView）の localStorage が iOS の端末バックアップに含まれるかは**未検証**（`Library/WebKit/` 配下に置かれるが、iOSがWebKitのデータをバックアップ対象として扱うかはバージョン差がある可能性がある）。ここを推測で「大丈夫」と扱うと、機種変更で記録が消える事故になる。
+
+**対策（確実側に倒す）**：localStorage を正本のまま残しつつ、**`Documents/` にJSONを二重書き出しする**。`Documents/` は iOS のバックアップ対象であることが仕様として明示されている領域。
+
+- 書き出し：`@capacitor/filesystem` で `Documents/kintore-backup.json` へ。タイミングは現行のGAS自動送信と同じ**起動時＋`visibilitychange(hidden)`**（＝既存の同期フックをそのまま流用でき、実装量が小さい）
+- 読み戻し：起動時に記録が0件で、かつ `Documents/kintore-backup.json` が存在すれば、そこから復元する（機種変更・アプリ再インストール時の自動復旧）
+- データ量：実測で1ヶ月20.5KB＝**年間約240KB**。10年でも2.4MBなので容量の懸念はない
+
+**空データでバックアップを潰さないための順序制御（実装時に追加）**：機種変更直後は記録が空の状態で起動するため、読み戻しが終わる前に書き出しが走ると、**空のデータでバックアップを上書きして復元元を自分で消す**。`nativeRestorePending` フラグを立て、読み込み中は書き出しを行わない。また読み戻しは「記録が0件のときだけ」実行し、記録がある端末では絶対にファイルへ触れない。
+
+**設定画面での見せ方**（一般ユーザーは「見えない機能」を信用しないので、動いている証拠を出す）:
+```
+ データの保存
+ ┌────────────────────────────────────────┐
+ │ ✓ 記録はこのiPhoneの中に保存されます        │
+ │ ✓ iPhoneのバックアップに自動で含まれます     │
+ │   最終保存：2026/08/10 10:07               │
+ │                                          │
+ │ 機種変更や紛失のときは、iPhoneのバックアップ  │
+ │ から復元すれば記録もそのまま戻ります。       │
+ │ 設定は必要ありません。                      │
+ ├────────────────────────────────────────┤
+ │ [ バックアップファイルを書き出す ]  ← 既存CSV │
+ └────────────────────────────────────────┘
+```
+
+### 7-4. ローカル通知（4.2対策）
+
+**なぜこれが4.2対策になるか**：現行PWAには「**画面ロック中はタイマーの通知音が鳴らない**」という、iOS WebView固有の制約がある（本書「実装ノート・制約」に記載）。ネイティブ化＋ローカル通知はこれを解消する。つまり「Webの見た目をラップしただけ」ではなく、**ネイティブでなければ実現できない価値がある**ことを審査官に説明できる。
+
+**実装内容**：**インターバル／レストタイマーのバックグラウンド通知のみ**。タイマー開始時に完了時刻へローカル通知をスケジュールし、アプリを閉じても画面ロック中でも鳴らす。タイマーを止めたら通知をキャンセルする。
+
+**必要な追加**：`@capacitor/local-notifications`、`Info.plist` の通知許可、初回タイマー使用時の許可ダイアログ（起動直後に出すと拒否されやすいので、**タイマーを初めて使うタイミング**で出す）
+
+**実装の詳細（2026-08-10 実装）**：通知IDは `1` 固定（同時に走るタイマーは1本のため、常に上書き＝取り違えが起きない）。予約と取り消しの対応は次のとおり。
+
+| きっかけ | 動作 |
+|---|---|
+| タイマー開始／再開 | 終了時刻に予約（`allowWhileIdle: true`） |
+| ＋30秒／−30秒で終了時刻が動く | いったん取り消して予約し直す |
+| 一時停止 | 取り消す（止めている間に鳴らさない） |
+| リセット | 取り消す |
+| アプリが開いたまま終了時刻に達した | 取り消す（画面側で音・バイブが鳴るため二重に鳴らさない） |
+| 設定で通知をOFF | 取り消す。ONに戻したとき計測中なら予約し直す |
+
+権限は `ensureNotifPermission()` で、**未決定のときだけ1回**要求する（拒否済みなら二度と出さない）。
+
+**「休養日リマインダー」は入れない（2026-08-10 ユーザー決定）**：当初は4.2対策を厚くする目的で「最終トレーニング日からN日経過で通知」を併記していたが、(1)**4.2の説明はタイマー通知だけで成立する**（既存の実害を潰す機能であり、取ってつけた通知ではない）、(2)通知機能が増えるほど初回の権限要求が重くなり一般ユーザーに嫌われる、(3)そもそも「休養日リマインダー」という名前が**「今日は休養日です」と読めるのに実際はサボり検知**で、名前と中身が食い違っていた（v0.11.1の「すべて表示」ボタンと同じ誤読の構造）。必要になれば後から追加できる。
+
+### 7-5. GAS同期の除外方法
+
+コードを残したまま画面から隠すのは、ガイドライン2.3.1（hidden features）の観点で望ましくない。**ビルド時にソースごと除去する**方式にする。
+
+`build-ios.js`（新規）がリポジトリ直下のソースを `www/` へコピーしながら変換する。**PWA版のソースは一切変えない**（マーカーコメントを足すだけ）ので、自分の運用に影響しない。
+
+**方式：マーカー＋スタブ差し替え（2026-08-10、実装時に変更）**
+
+当初は「マーカーで囲んだ範囲を削除する」つもりだったが、実装前にソースを調べたところ、同期関数はアプリの各所から**7か所**で呼ばれていた（記録タブの空状態・設定画面の描画・イベント登録・起動時・画面切替時）。削除するだけでは呼び出し側が `ReferenceError` になり、**アプリ自体が起動しなくなる**。そこで次の方式に改めた。
+
+- ソースを `/* @sync:start */` 〜 `/* @sync:end */` で囲む（現在**3ブロック**：同期関数の本体／記録タブからの復元導線／設定画面のイベント登録）
+- ビルド時、**1つ目のブロックを「何もしない同名関数10個」のスタブに差し替え**、2つ目以降は削除する
+- 呼び出し側のコードは**一行も書き換えない**。PWA版とApp Store版でソースを分岐させずに済む
+- ブロック数が想定と変わったらビルドを中止する（`EXPECTED_BLOCKS`）。マーカーの書き損じに気づかないまま出力しないため
+
+**自動検証（`build-ios.js` に内蔵）**：生成後の `www/js/app.js` と `www/index.html` から、同期を実際に動かす部品（`kintore_gas_url` / `kintore_last_sync` / `kintore_sync_unlocked` / `gasUrlInput` / `syncNowBtn` / `restoreCloudBtn` / `action: 'restore'`）が消えていることを確認し、残っていればビルドを中止する。
+
+- 検査はスタブの範囲（`@sync:stub-start` 〜 `@sync:stub-end`）を除いて行う。スタブ自身が `runSync` などの名前を含むため、除かないと自分の生成物を誤検出する（実際に一度これで止まった）
+- `script.google.com` は**ご意見・ご要望フォーム**（`FEEDBACK_GAS_URL`）で正規に使うため、文字列の存在自体は禁止しない
+- ビルド環境の注意：`fs.cpSync(..., {recursive:true})` は Node v24.14.1 / Windows でプロセスごと異常終了する（終了コード 0xC0000409）。`build-ios.js` は自前の再帰コピーを使っている
+
+### 7-6. 申請物一式
+
+| 項目 | 状態 | 内容 |
+|---|---|---|
+| アプリ名 | **未決定** | App Store Connect でアプリ作成時に必要。端末のホーム画面に出る名前（`CFBundleDisplayName`）は「筋トレ記録」で設定済み |
+| アプリアイコン | ✅ 作成済み | `icons/icon-512.png` のダンベルをピクセル計測してSVGで組み直し、1024×1024で再生成（拡大ボケなし・アルファチャンネルなし）。`icons/icon-1024.png` に控えを保存 |
+| 起動画面 | ✅ 作成済み | 同じダンベルを黒背景の中央に配置（2732×2732）。Capacitorのデフォルト画像を差し替え済み |
+| プライバシーポリシー | ✅ 作成済み | `privacy-policy.html`。記録は端末内のみ／端末バックアップはApple管理下／ご意見フォームは本文・メール（任意）・バージョンの3点のみ／通知はローカル通知／第三者提供なし／トラッキングなし |
+| サポートページ | ✅ 作成済み | `support.html`。問い合わせ先＋FAQ7項目。App Store Connect の「サポートURL」に指定する |
+| App Privacy申告 | 未整理 | 「連絡先情報＞メールアドレス」を**アプリの機能**目的で収集・**トラッキングなし**・ユーザーIDに紐付けない（任意入力のため）。それ以外は収集なし |
+| スクリーンショット | 未作成 | 6.9インチ・6.5インチ必須。記録／履歴カレンダー／グラフ／タイマーの4枚 |
+| Review Notes | 未作成 | 下記 |
+
+**公開URL**（GitHub Pages。リポジトリ直下に置いたのでそのまま配信される）
+- プライバシーポリシー：`https://kanaeru-apps.github.io/kintore-log/privacy-policy.html`
+- サポート：`https://kanaeru-apps.github.io/kintore-log/support.html`
+
+**Review Notes 案（v1.0・英語）**
+> This app is a workout log that works fully offline. No account, no login, and no server communication are required to use any feature.
+> All records are stored locally on the device and included in the standard iOS device backup.
+> The only network feature is an optional "Send feedback" form in Settings, where the user may voluntarily provide an email address to receive a reply. It is not required to use the app.
+> Local notifications are used for the rest/interval timer so that it can alert the user while the screen is locked or the app is in the background.
+
+### 7-7. v1.1（Googleログイン同期）の設計方針
+
+v1.0公開後に着手する。**GASを完全に廃止し、アプリからGoogle Sheets APIを直接叩く**。
+
+- **スコープは `drive.file` のみ**：Googleのスコープ分類で **Non-sensitive（Recommended）**＝追加のOAuth検証・年次審査が不要。Sheets API はこのスコープをサポートする
+- **アクセス範囲**：「このアプリが作成したファイル」＋「ユーザーがピッカーで明示的に選んだファイル」のみ。ユーザーのDrive全体は見えない ← これがそのまま設定画面の説明文になる
+- **GASが担っていた処理をアプリ側JSへ移植する**：種目のマージ＋tombstone削除（`writeExercises_`）、日付ソート（`sortByDate_`）、シートに直接書かれた動画URL・メモの保護（`pickValue_`）、同日データの置き換え（`deleteRowsForDates_`）
+- **通信回数が増える**：GASは「POST 1回」で完結していたが、API直結は「読む→マージ→書く」の2〜3往復になる。複数端末同時更新時の競合リスクがわずかに上がる（現行GASにも排他ロックは無いため、質的な差は小さい）
+- **既存のバックアップスプレッドシート（`1YAocqucmc4...`）の扱い**：`drive.file` では**アプリから見えない**（アプリが作成したファイルではないため）。データを引き継ぐ場合は「現行アプリで復元→端末にデータを載せる→Googleログイン版で新規シートへ書き出す」の手順を取る。既存シートは削除せずそのまま残す
+- **未検証の関門**：iOSではWebView内でGoogleのログイン画面を直接開くことをGoogle側が禁止している（`disallowed_useragent`）。`ASWebAuthenticationSession` を使うCapacitorプラグイン経由での実装が必要。**ここは着手して初めて分かる詰まりがある可能性がある**ため、v1.0の公開を人質に取らない順序（＝v1.0公開後に着手）にしている
+- 費用：Sheets API / Drive API とも無料枠内。OAuth審査も `drive.file` なら不要
+
+**v1.1の設定画面 UI案**
+```
+ Googleスプレッドシートに保存
+ ┌────────────────────────────────────────┐
+ │        [  G  Googleでログイン  ]         │
+ │ 記録をご自身のGoogleドライブに自動保存します。 │
+ │ このアプリが作成したファイル以外には          │
+ │ 一切アクセスしません。                     │
+ └────────────────────────────────────────┘
+ ── ログイン後 ──
+ │ 保存先   筋トレ記録        [シートを開く]   │
+ │ アカウント xxx@gmail.com   [ログアウト]     │
+ │ 最終同期  2026/8/10 10:07                 │
+ │ 変更は起動時と画面切替時に自動送信            │
+ │ [今すぐバックアップ]  [スプレッドシートから復元] │
+```
+URL入力欄が消えて**「ログイン」1ボタン**になるため、「上級者向け」の折りたたみも警告文も不要になる。
+
+### 7-8. 実装順序
+
+1. ✅ Capacitorセットアップ（`package.json` / `capacitor.config.json` / `build-ios.js`）
+2. ✅ GAS同期の除去マーカーを現行ソースに埋め込む（PWA版の挙動は無変更）
+3. ✅ `Documents/` 二重書き出し＋起動時復元の実装
+4. ✅ ローカル通知（タイマー）
+5. ✅ 設定画面の「データの保存」セクション（7-3のUI）
+6. ✅ 自動検証（Playwrightで PWA版の回帰と、Capacitorをモックしたネイティブ経路の両方）
+7. ✅ プライバシーポリシー・サポートページを作成（`privacy-policy.html` / `support.html`）
+8. ✅ `codemagic.yaml` を作成（無音カメラの構成を流用＋`node build-ios.js` を追加）
+9. ✅ `npx cap add ios` でiOSプロジェクトを生成し、Info.plist・端末対応・アイコンを調整（7-9）
+10. アプリ名を決定 → App Store Connect でアプリを作成
+11. スクリーンショットを作成（6.9インチ・6.5インチ）
+12. Codemagicにリポジトリを接続してビルド → TestFlightで実機検証（**特にタイマーの画面ロック中通知**）
+13. App Store Connect でメタデータ入力・App Privacy申告・審査提出
+
+**2026-08-10 時点の検証結果**（実機前に確認できたこと）
+
+| 確認項目 | 結果 |
+|---|---|
+| PWA版がPhase 7の変更で壊れていないか | ✅ コンソールエラーなし。種目追加・タイマー・設定画面すべて従来どおり。`データの保存`セクションはPWAでは非表示 |
+| App Store版（`www/`）が同期スタブで起動するか | ✅ 起動する。コンソールエラーなし |
+| 隠しコマンド（バージョン7回タップ）で同期が復活しないか | ✅ 何も出ない（2.3.1対策として重要） |
+| タイマー開始→通知予約、停止→取り消し | ✅ `schedule(id=1, at=開始+60秒)` → `cancel(id=1)` を確認 |
+| 画面を離れたときのバックアップ書き出し | ✅ `Documents/kintore-backup.json` へ1,876文字を書き出し |
+| 機種変更の再現（localStorageを空にして再起動） | ✅ ファイルから自動復元され、種目・記録が戻る |
+
+**実機でなければ確認できない残件**：ネイティブブリッジ経由で `Filesystem` / `LocalNotifications` が実際に応答すること、画面ロック中に通知音が鳴ること、`Documents/` がiCloudバックアップに含まれること。
+
+### 7-9. iOSプロジェクトとCodemagicビルド設定
+
+**iOSプロジェクトの生成場所を「Codemagic上」から「Windows上でコミット」に変更した**
+
+当初は `npx cap add ios` をmacOS側（Codemagic）で毎回実施する想定だったが、それだと Info.plist の設定（表示名・向き・輸出コンプライアンス）やアイコンがビルドのたびに初期状態へ戻ってしまう。そこで **Windows で `cap add ios` を実行し、`ios/` をリポジトリにコミットする**方式にした（無音カメラと同じ）。
+
+ただし Windows で生成すると1ファイルだけ壊れる：
+
+```swift
+// ios/App/CapApp-SPM/Package.swift（Windowsが生成したもの）
+.package(name: "CapacitorFilesystem", path: "..\..\..\node_modules\@capacitor\filesystem")
+```
+
+パス区切りが `\` になり、macOSのビルドで解決できない。このファイルは冒頭に "DO NOT MODIFY THIS FILE - managed by Capacitor CLI" とある生成物で、**`cap sync` を実行するたびに必ず上書き生成される**（存在有無に関わらず書き出される）。したがって `.gitignore` で追跡から外し、Codemagic上の `npx cap sync ios` に正しい `/` 区切りで生成させている。
+
+**追跡しないもの**（すべて `cap sync` が再生成する）
+`www/` ／ `ios/App/App/public/` ／ `ios/App/App/capacitor.config.json` ／ `ios/App/CapApp-SPM/Package.swift` ／ `ios/App/Pods/` ／ `node_modules/`
+
+**Info.plist の調整点**
+
+| キー | 値 | 理由 |
+|---|---|---|
+| `CFBundleDisplayName` | 筋トレ記録 | `capacitor.config.json` の `appName` から自動で入る |
+| `ITSAppUsesNonExemptEncryption` | `false` | 宣言しないとビルドを上げるたびに輸出コンプライアンスを聞かれる |
+| `UISupportedInterfaceOrientations` | Portrait のみ | 下記 |
+| `UISupportedInterfaceOrientations~ipad` | 削除 | iPhone専用にしたため不要 |
+
+**縦向き固定にした理由**：横向き（852×393）でも横スクロールは発生せずレイアウトは崩れないが、タイマー画面で「開始」ボタンが画面外に出てスクロールが必要になることを実測で確認した。トレーニング中に端末を寝かせて意図せず回転するのも避けたいため縦固定にした。
+
+**iPhone専用にした理由**（`TARGETED_DEVICE_FAMILY = 1`）：UIが縦長のスマホ前提（下部タブバー・カード幅）で、iPadでは間延びする。無音カメラは iPad で審査されてリジェクトされた経緯があり、**対応端末を絞れば審査もその端末で行われる**。iPad対応は後から `1,2` に戻せばよい。
+
+**codemagic.yaml**（無音カメラとの違い）
+
+| 項目 | 内容 |
+|---|---|
+| `bundle_identifier` | `com.kanaeru.kintore` |
+| ビルド手順 | `npm install` → **`node build-ios.js`** → `npx cap sync ios` → `use-profiles` → `agvtool` → `build-ipa` |
+| `node build-ios.js` を挟む理由 | `www/` は追跡していないため、Codemagic上で生成しないと空になる。ここでクラウド同期のスタブ差し替えと混入チェックも走るので、**同期コードが残っているとこの段階でビルドが止まる** |
+| `submit_to_testflight` | `false`（外部テスト審査への提出。前のビルドが審査中だと毎回失敗するため。内部テストは false でも即使える） |
+
+Codemagic側で必要な準備：リポジトリ接続、`Settings > Integrations` に App Store Connect の API キーを **`Codemagic` という名前で**登録（yaml の `integrations` がこの名前を参照している）。無音カメラで登録済みなら共用できる。
+
+### 7-10. 費用
+
+追加費用なし。Apple Developer Program（$99/年）は無音カメラで支払い済み。Codemagicは無料枠内。Google Sheets/Drive APIも無料枠内（v1.1）。
+
 ## ファイル構成
 
 ```
@@ -257,11 +498,24 @@ iPhoneで使う筋トレ記録アプリ。**PWA（Webアプリ）方式**で完�
 │   ├── db.js          ← データ層（localStorage抽象化・CRUD）
 │   ├── app.js         ← 画面制御・レンダリング・イベント
 │   └── charts.js      ← グラフ・レポート（種目別グラフ・部位別ボリューム、自作SVG）
-├── icons/             ← PWAアイコン（192/512/apple-touch-icon）
+├── icons/             ← PWAアイコン（192/512/apple-touch-icon）＋ App Store用 icon-1024.png
 ├── manifest.json      ← ホーム画面追加用
 ├── sw.js              ← オフラインキャッシュ（HTTPS公開後に有効）
 ├── gas/code.gs        ← スプレッドシート同期用GAS Web Appテンプレ（ユーザー自身のスプレッドシートにコピペして使う。PWA本体からは読み込まれない）
-└── gas/feedback.gs    ← ご意見・ご要望 受付用GAS Web Appテンプレ（受付専用スプレッドシートに貼る。発行URLはapp.jsのFEEDBACK_GAS_URLに埋め込む）
+├── gas/feedback.gs    ← ご意見・ご要望 受付用GAS Web Appテンプレ（受付専用スプレッドシートに貼る。発行URLはapp.jsのFEEDBACK_GAS_URLに埋め込む）
+│
+│  ===== ここから下は App Store版（Phase 7）専用 =====
+├── privacy-policy.html ← プライバシーポリシー（GitHub Pagesで配信）
+├── support.html        ← サポートページ・FAQ（同上）
+├── package.json        ← Capacitor の依存とビルドスクリプト
+├── capacitor.config.json ← appId: com.kanaeru.kintore / webDir: www
+├── build-ios.js        ← 上のPWAソースから www/ を生成（クラウド同期をスタブに差し替え）
+├── codemagic.yaml      ← Codemagic（macOSクラウド）でのiOSビルド定義
+├── www/                ← build-ios.js の生成物（追跡しない）
+└── ios/                ← Xcodeプロジェクト（cap add ios で生成、コミット対象）
+    └── App/App/
+        ├── Info.plist              ← 表示名・縦向き固定・輸出コンプライアンス
+        └── Assets.xcassets/        ← AppIcon（1024）・Splash（2732）
 ```
 
 ## データモデル（localStorage キー: `kintore_v1`）
@@ -321,8 +575,12 @@ iPhoneで使う筋トレ記録アプリ。**PWA（Webアプリ）方式**で完�
 
 0. ~~**v0.10.0のリリース手順**~~ → **完了**（2026-08-09。GASをv4に再デプロイ（`clasp redeploy` でデプロイIDを維持＝URL不変）してから、アプリをGitHub Pagesへpushした）。v0.10.1以降はCSV形式が変わらないためGASの再デプロイ不要、アプリのpushだけでよい。iPhoneではホーム画面アプリを開き直して設定画面下部が **v0.11.1** になっていることを確認する
 1. ~~iPhoneを新URLへ移行~~ / ~~旧リポジトリ `ChihiroHonma/kintore-log` を非公開化~~ → **どちらも完了**（旧リポジトリが `PRIVATE` になっていることを2026-08-07に `gh repo view` で確認）
-2. **Phase 7：App Store公開**（アプリ名は未決定）。Capacitorでラップし、`ツール_無音カメラ` で構築済みのCodemagic（Windows環境からiOSビルド）構成を流用する。販売者名は個人名義のまま（本名表示を許容と決定済み）
-   - 想定される関門：**ガイドライン4.2（Minimum Functionality）**。Webアプリをラップしただけと見なされるリスクがあるため、ネイティブならではの要素（通知・ウィジェット・HealthKit連携等）の追加を検討する
-   - **App Privacy申告**：ご意見フォームでメールアドレスを任意収集しているため「データ収集なし」では申告できない
-   - プライバシーポリシーのHTMLページが未作成（申請必須。無音カメラ同様GitHub Pagesに1枚置く）
+2. **Phase 7：App Store公開** → **コード側は完了（2026-08-10）。上記「Phase 7」を参照**
+   - 方針確定：**v1.0＝クラウド同期なし**（iCloudバックアップ＋ローカル通知）で確実に審査を通す → **v1.1＝Googleログイン同期**を追加。PWA版は自分専用として現状維持
+   - 完了：実装・自動検証・プライバシー/サポートページ・`codemagic.yaml`・Xcodeプロジェクト・アイコン（7-8の1〜9）
+   - **次にやること（ユーザー作業が必要）**
+     1. **アプリ名を決める** → App Store Connect で新規アプリを作成（Bundle ID `com.kanaeru.kintore` を登録）
+     2. Codemagic にこのリポジトリを接続し、`ios-workflow` を実行 → TestFlight へ
+     3. 実機で **画面ロック中のタイマー通知**と、機種変更時の復元を確認
+     4. スクリーンショット4枚（記録／履歴／グラフ／タイマー）を作成して審査提出
 3. Phase 2 以降へ

@@ -1837,8 +1837,9 @@
         '</div>';
       }).join('') + '</div>' : '');
     }).join('');
-    $('#storageInfo').textContent = 'ブラウザ内に保存中 · 約 ' + DB.sizeKB() + ' KB';
+    $('#storageInfo').textContent = (isNativeApp() ? 'この端末に保存中 · 約 ' : 'ブラウザ内に保存中 · 約 ') + DB.sizeKB() + ' KB';
     $('#restoreBackupRow').style.display = hasPreimportBackup() ? '' : 'none';
+    renderStorageSection();
     renderSyncSection();
     renderWeightStepSettings();
   }
@@ -1855,6 +1856,15 @@
     }).join('');
   }
 
+  /* @sync:start
+     ここから @sync:end までは iOS ビルド（build-ios.js）で「何もしないスタブ」に
+     差し替えられ、App Store 版にはクラウド同期が一切入らない（ガイドライン2.3.1対策）。
+     呼び出し側（renderLog の空状態・renderSettings・bindSettings・起動時/visibilitychange）は
+     一切書き換えないため、PWA 版の挙動はこのマーカーを足す前とまったく同じ。
+     ブロック外から呼ばれるのは syncUnlocked / getGasUrl / setGasUrl / checkGasUrl /
+     onVersionTap / renderSyncSection / runSync / autoSync / restoreFromCloud /
+     promptCloudRestore の10個で、build-ios.js のスタブはこの10個を空実装で用意する。
+     ここに関数を足して外から呼ぶ場合は、build-ios.js の STUB にも同名を追加すること。 */
   /* ================== クラウド同期（スプレッドシート・Phase 4） ==================
      一般公開時に非エンジニアのユーザーを混乱させないよう、設定画面には常時表示しない。
      設定画面末尾のバージョン表示を7回連続タップすると解除され、以後はこの端末で常に表示される。 */
@@ -2081,6 +2091,181 @@
         done();
       });
   }
+  /* @sync:end */
+
+  /* ================== ネイティブ連携（Capacitor / App Store版でのみ動く） ==================
+     PWA（ブラウザ）には window.Capacitor が無いため、この節の関数はすべて何もしないで返る。
+     PWA版とApp Store版でソースを分岐させないための共通実装（build-ios.js の除去対象ではない）。 */
+
+  function isNativeApp() {
+    try {
+      return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
+    } catch (e) { return false; }
+  }
+  /* Capacitor.Plugins は registerPlugin() を呼んだ時点で初めて中身が入る（capacitor.js の実装）。
+     参照するだけでは undefined なので、未登録なら自分で登録してから使う。
+     ネイティブ側にそのプラグインが組み込まれていない場合はプロキシが返り、
+     実際に呼んだときに reject するため、呼び出し側はすべて catch している。 */
+  var nativePluginCache = {};
+  function nativePlugin(name) {
+    if (Object.prototype.hasOwnProperty.call(nativePluginCache, name)) return nativePluginCache[name];
+    var p = null;
+    try {
+      var C = window.Capacitor;
+      if (C && typeof C.registerPlugin === 'function') {
+        p = (C.Plugins && C.Plugins[name]) || C.registerPlugin(name);
+      }
+    } catch (e) { p = null; }
+    nativePluginCache[name] = p;
+    return p;
+  }
+
+  /* ---- 端末内バックアップ（iOSの端末バックアップ／iCloudに載せる） ----
+     WKWebViewのlocalStorageがiOSのバックアップに含まれるかは実装依存で確証が無いため、
+     「ユーザーが作成したデータの置き場」としてバックアップ対象が明示されている Documents/ にも
+     まるごと書き出しておく。機種変更・再インストール後の初回起動で記録が空なら自動で読み戻す。 */
+  var NATIVE_BACKUP_FILE = 'kintore-backup.json';
+  var NATIVE_BACKUP_AT_KEY = 'kintore_native_backup_at';
+  /* 復元の読み込み中は書き出しを止める。
+     機種変更直後は記録が空の状態で起動するため、読み終わる前に書いてしまうと
+     「空のデータ」でバックアップを上書きし、復元元を自分で消すことになる */
+  var nativeRestorePending = false;
+
+  function getNativeBackupAt() {
+    try { return localStorage.getItem(NATIVE_BACKUP_AT_KEY) || ''; } catch (e) { return ''; }
+  }
+
+  function writeNativeBackup() {
+    var fsPlugin = nativePlugin('Filesystem');
+    if (!isNativeApp() || !fsPlugin) return Promise.resolve(false);
+    if (nativeRestorePending) return Promise.resolve(false);
+    var json = DB.exportStateJSON();
+    if (!json) return Promise.resolve(false);
+    return fsPlugin.writeFile({
+      path: NATIVE_BACKUP_FILE,
+      data: json,
+      directory: 'DOCUMENTS',
+      encoding: 'utf8',
+      recursive: true
+    }).then(function () {
+      try { localStorage.setItem(NATIVE_BACKUP_AT_KEY, new Date().toISOString()); } catch (e) { /* noop */ }
+      renderStorageInfo();
+      return true;
+    }).catch(function () {
+      // 失敗しても記録はlocalStorageに残っている。次の起動・画面切替で再試行される
+      return false;
+    });
+  }
+
+  /* 起動時：記録が1件も無いときだけ、端末内バックアップから読み戻す。
+     記録がある端末では絶対に触らない（古いバックアップで現在のデータを潰さないため） */
+  function restoreNativeBackupIfEmpty() {
+    var fsPlugin = nativePlugin('Filesystem');
+    if (!isNativeApp() || !fsPlugin) return;
+    if (DB.datesWithData().length) return;
+    nativeRestorePending = true;
+    fsPlugin.readFile({ path: NATIVE_BACKUP_FILE, directory: 'DOCUMENTS', encoding: 'utf8' })
+      .then(function (res) {
+        nativeRestorePending = false;
+        var data = res && res.data;
+        if (!data) return;
+        if (DB.datesWithData().length) return; // 読み込み待ちの間に記録が入った場合は上書きしない
+        if (!DB.restoreStateJSON(data)) return;
+        renderLog();
+        renderSettings();
+        toast('バックアップから記録を復元しました');
+      })
+      .catch(function () {
+        nativeRestorePending = false; // ファイルが無いのは初回起動として正常
+      });
+  }
+
+  /* ---- タイマーのローカル通知 ----
+     PWAは画面ロック中・バックグラウンドではJSが止まるため、終了時に鳴らそうとしても鳴らない。
+     ネイティブ版では「終了時刻に通知する」ようOSへ予約しておき、アプリが動いていなくても知らせる。
+     予約は開始・時間延長・再開のたびに取り直し、停止・終了時に取り消す。 */
+  var TIMER_NOTIF_ID = 1;
+  var notifPermissionAsked = false;
+
+  function ensureNotifPermission() {
+    var ln = nativePlugin('LocalNotifications');
+    if (!ln) return Promise.resolve(false);
+    return ln.checkPermissions()
+      .then(function (r) {
+        if (r && r.display === 'granted') return true;
+        if (r && r.display === 'denied') return false;
+        // 起動直後ではなく「タイマーを初めて使うとき」に許可を求める（拒否されにくくするため）
+        if (notifPermissionAsked) return false;
+        notifPermissionAsked = true;
+        return ln.requestPermissions().then(function (r2) { return !!(r2 && r2.display === 'granted'); });
+      })
+      .catch(function () { return false; });
+  }
+
+  function scheduleTimerNotification(endAtMs) {
+    var ln = nativePlugin('LocalNotifications');
+    if (!isNativeApp() || !ln) return;
+    if (!timerSettings.notifyOn) return;
+    cancelTimerNotification();
+    ensureNotifPermission().then(function (ok) {
+      if (!ok) return;
+      if (endAtMs <= Date.now()) return;
+      ln.schedule({
+        notifications: [{
+          id: TIMER_NOTIF_ID,
+          title: '筋トレ記録',
+          body: '休憩終了！ 次のセットへ',
+          schedule: { at: new Date(endAtMs), allowWhileIdle: true }
+        }]
+      }).catch(function () { /* noop */ });
+    });
+  }
+
+  function cancelTimerNotification() {
+    var ln = nativePlugin('LocalNotifications');
+    if (!ln) return;
+    try {
+      ln.cancel({ notifications: [{ id: TIMER_NOTIF_ID }] }).catch(function () { /* noop */ });
+    } catch (e) { /* noop */ }
+  }
+
+  /* ---- 設定画面「データの保存」 ----
+     App Store版にはクラウド同期が無いぶん、記録がどこにあり何で守られるのかを設定画面で示す。
+     PWA版ではクラウド同期セクションがその役目を果たすため、ここは空のまま。 */
+  function renderStorageSection() {
+    var box = $('#storageSectionContainer');
+    if (!box) return;
+    if (!isNativeApp()) { box.innerHTML = ''; return; }
+    box.innerHTML =
+      '<div class="s-section">' +
+        '<h4 class="s-title">データの保存</h4>' +
+        '<div class="panel-list">' +
+          '<div class="s-row"><div class="s-main">' +
+            '<b>記録はこのiPhoneの中に保存されます</b>' +
+            '<small>インターネットには送信されません。</small>' +
+          '</div></div>' +
+          '<div class="s-row"><div class="s-main">' +
+            '<b>iPhoneのバックアップに自動で含まれます</b>' +
+            '<small>機種変更や紛失のときは、iPhoneのバックアップ（iCloudバックアップ、または' +
+            'パソコンでのバックアップ）から復元すれば、記録もそのまま戻ります。設定は必要ありません。</small>' +
+          '</div></div>' +
+          '<div class="s-row"><div class="s-main">' +
+            '<small>最終保存：<span id="nativeBackupAt">' + esc(nativeBackupAtText()) + '</span></small>' +
+          '</div></div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function nativeBackupAtText() {
+    var at = getNativeBackupAt();
+    return at ? new Date(at).toLocaleString('ja-JP') : 'まだ作成されていません';
+  }
+
+  /* 書き出し直後に日時表示だけ差し替える（設定画面を開いていなければ何もしない） */
+  function renderStorageInfo() {
+    var el = $('#nativeBackupAt');
+    if (el) el.textContent = nativeBackupAtText();
+  }
 
   /* ================== ご意見・ご要望（一般公開向けサポート窓口） ==================
      受付専用GAS（gas/feedback.gs）に送信する。バックアップ用GASとは別物で、
@@ -2140,6 +2325,7 @@
     };
   }
 
+  /* @sync:start */
   /* 記録が空の端末からの復元導線（記録タブの空状態から。隠し機能の解除状態と独立して使える） */
   function promptCloudRestore() {
     if (!getGasUrl()) {
@@ -2152,11 +2338,16 @@
     }
     restoreFromCloud();
   }
+  /* @sync:end */
 
   function bindSettings() {
     var versionEl = $('.version');
     if (versionEl) versionEl.addEventListener('click', onVersionTap);
 
+    /* @sync:start
+       同期セクション（#syncSectionContainer）のイベント登録。中身を描画するのは renderSyncSection で、
+       iOS版ではそれがスタブになり常に空のため、この登録も丸ごと不要になる。
+       ここを残すと動かないコードだけが残り、ガイドライン2.3.1（休眠機能）の指摘対象になり得る。 */
     $('#syncSectionContainer').addEventListener('change', function (e) {
       if (e.target.id === 'gasUrlInput') {
         var v = e.target.value.trim();
@@ -2178,6 +2369,7 @@
       if (e.target.id === 'syncNowBtn') runSync();
       if (e.target.id === 'restoreCloudBtn') restoreFromCloud();
     });
+    /* @sync:end */
 
     $('#weightStepList').addEventListener('click', function (e) {
       var row = e.target.closest('[data-wstep]');
@@ -2266,6 +2458,9 @@
       ui.exExpanded = {};
       renderLog();
       renderSettings();
+      // 端末内バックアップも即座に空にする。ここで書き換えずにアプリを終了されると、
+      // 次の起動時に「記録が0件」と判定されて消したはずの記録が復元されてしまう
+      writeNativeBackup();
       toast('データを初期化しました');
     };
   }
@@ -2878,6 +3073,7 @@
     timer.finished = false;
     requestWakeLock();
     startTick();
+    scheduleTimerNotification(timer.endAt);
     setTimerView('running');
     renderTimer();
   }
@@ -2889,6 +3085,8 @@
     timer.finished = true;
     timer.remaining = 0;
     releaseWakeLock();
+    // アプリが動いている状態で終わったので、OSに預けた通知はもう要らない
+    cancelTimerNotification();
     playAlarmSound();
     vibrateAlarm();
     showTimerNotification();
@@ -2903,11 +3101,13 @@
       timer.paused = false;
       requestWakeLock();
       startTick();
+      scheduleTimerNotification(timer.endAt);
     } else {
       timer.remaining = (timer.endAt - Date.now()) / 1000;
       timer.paused = true;
       stopTick();
       releaseWakeLock();
+      cancelTimerNotification(); // 一時停止中に終了時刻が来ても鳴らさない
     }
     renderTimer();
   }
@@ -2915,7 +3115,12 @@
     if (timer.finished) return;
     timer.total += sec;
     if (timer.paused) timer.remaining += sec;
-    else { timer.endAt += sec * 1000; timer.remaining = (timer.endAt - Date.now()) / 1000; scheduleFinishTimeout(); }
+    else {
+      timer.endAt += sec * 1000;
+      timer.remaining = (timer.endAt - Date.now()) / 1000;
+      scheduleFinishTimeout();
+      scheduleTimerNotification(timer.endAt); // 終了時刻が動いたので通知も取り直す
+    }
     // −30秒で残りが尽きたら終了扱い（一時停止中はtickが動かないためここで確定させる）
     if (timer.remaining <= 0) { finishTimer(); return; }
     renderTimer();
@@ -2926,6 +3131,7 @@
     stopVibrate();
     timer.running = false; timer.paused = false; timer.finished = false;
     releaseWakeLock();
+    cancelTimerNotification();
     clearBadge();
     setTimerView('setup');
     renderTimer();
@@ -3082,7 +3288,13 @@
     $('#toggleNotifyOn').addEventListener('change', function (e) {
       timerSettings.notifyOn = e.target.checked;
       saveTimerSettings();
-      if (timerSettings.notifyOn) askNotify();
+      if (timerSettings.notifyOn) {
+        askNotify();
+        // 計測中に通知をONにしたら、その回の終了時刻からちゃんと鳴るようにする
+        if (timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
+      } else {
+        cancelTimerNotification(); // OFFにした以上、OSに預けた予約も取り消す
+      }
     });
   }
 
@@ -3119,10 +3331,16 @@
   loadWeightStepSettings();
   renderLog(true);
 
+  // 機種変更・再インストール後の初回起動なら、端末内バックアップから記録を読み戻す
+  // （記録が1件でもある端末では何もしない）
+  restoreNativeBackupIfEmpty();
+
   // 自動バックアップ：起動直後（描画を妨げないよう少し遅らせる）と、
   // アプリを閉じる・他アプリへ切り替えるとき（hidden）に未送信の変更を送る
-  setTimeout(function () { autoSync(); }, 2000);
+  setTimeout(function () { autoSync(); writeNativeBackup(); }, 2000);
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'hidden') autoSync({ keepalive: true });
+    if (document.visibilityState !== 'hidden') return;
+    autoSync({ keepalive: true });
+    writeNativeBackup();
   });
 })();

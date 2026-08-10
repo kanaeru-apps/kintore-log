@@ -1,0 +1,20 @@
+{
+  "name": "kintore-log",
+  "version": "1.0.0",
+  "description": "筋トレ記録 - iOS app (Capacitor wrapper for the PWA)",
+  "private": true,
+  "scripts": {
+    "build": "node build-ios.js",
+    "sync": "node build-ios.js && cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/ios": "^8.5.0",
+    "@capacitor/local-notifications": "^8.2.1"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5"
+  }
+}
