@@ -1647,19 +1647,16 @@
     $('#calMonthLabel').textContent = y + '年' + (m + 1) + '月';
   }
 
-  /* 何で絞り込んでいるかを一覧の上に出す。月を移動して選択日が画面から消えても、ここを見れば分かる */
+  /* 絞り込み中だけ「すべて表示」を出す。
+     v0.11.0では「2026/8/9(日) の記録」と日付も並べていたが、選択中の日はカレンダーで光っていて
+     下のカードにも日付が出ているため、同じことを三度言っていた。しかも日付の真横に「すべて表示」が
+     並ぶせいで“その日の全部を表示するボタン”と読めてしまう。文言を消してボタンだけ中央に置く */
   function renderHistFilterBar() {
-    var bits = [];
-    if (histCal.date) {
-      var d = parseDate(histCal.date);
-      bits.push('<span class="hfb-date num">' + d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate() +
-        '</span><span class="hfb-wd">(' + WD[d.getDay()] + ')</span>');
-    }
-    if (histCal.part !== 'ALL') bits.push(partChip(histCal.part));
-    if (!bits.length) { $('#histFilterBar').innerHTML = ''; return; }
-    $('#histFilterBar').innerHTML = '<div class="hist-filter-bar">' +
-      '<span class="hfb-main">' + bits.join('') + '<span class="hfb-txt">の記録</span></span>' +
-      '<button class="link" data-action="hist-clear" type="button">すべて表示</button></div>';
+    var filtering = histCal.date || histCal.part !== 'ALL';
+    $('#histFilterBar').innerHTML = filtering
+      ? '<div class="hist-filter-bar">' +
+          '<button class="link" data-action="hist-clear" type="button">すべて表示</button></div>'
+      : '';
   }
 
   function applyHistCalOpen() {
