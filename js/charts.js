@@ -9,13 +9,9 @@ var Charts = (function () {
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
 
   var VOLT = '#d7ff3e';
-  /* 記録画面の部位チップ（.p-xxx）と同じ配色。有酸素は重量ボリューム対象外のため含めない */
-  var PART_COLOR = {
-    '胸': '#ff8484', '背中': '#74b6ff', '脚': '#ffbc57', '肩': '#c9a4ff',
-    '腕': '#62e3cb', '腹': '#ff9ec4', 'その他': '#9ba0a8'
-  };
+  var PART_COLOR = DB.PART_COLOR;  /* 配色の実体は db.js（app.js のカレンダーと共用するため） */
 
-  var state = { cardTab: 'exercise', part: null, exId: null, calPart: null, calYear: null, calMonth: null, bound: false };
+  var state = { cardTab: 'exercise', part: null, exId: null, bound: false };
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -401,102 +397,12 @@ var Charts = (function () {
       renderExWheel();
     });
     bindExWheel();
-
-    $('#calPartChips').addEventListener('click', function (e) {
-      var b = e.target.closest('[data-cal-part]');
-      if (!b) return;
-      state.calPart = b.dataset.calPart;
-      populateCalPartChips();
-      renderCalendarGrid();
-    });
-    $('#calPrev').addEventListener('click', function () { calShiftMonth(-1); });
-    $('#calNext').addEventListener('click', function () { calShiftMonth(1); });
-  }
-
-  /* ================== トレーニング実施カレンダー ================== */
-  /* そのエントリに何か1項目でも実際の入力があるか（app.jsのfilledSetsと同等の判定） */
-  function isEntryFilled(e) {
-    if (e.part === '有酸素') {
-      return e.sets.some(function (s) {
-        return (+s.t || 0) > 0 || (+s.ts || 0) > 0 || (+s.d || 0) > 0 || (+s.sp || 0) > 0 ||
-          (+s.inc || 0) > 0 || (+s.cal || 0) > 0 || (+s.hr || 0) > 0;
-      });
-    }
-    return e.sets.some(function (s) { return (+s.w || 0) > 0 || (+s.r || 0) > 0; });
-  }
-  /* 指定した部位（'ALL'なら全部位）で実施した日付の集合を返す */
-  function trainedDates(part) {
-    var set = {};
-    DB.datesWithData().forEach(function (date) {
-      var w = DB.getWorkout(date);
-      var matched = (w.entries || []).some(function (e) {
-        if (part !== 'ALL' && e.part !== part) return false;
-        return isEntryFilled(e);
-      });
-      if (matched) set[date] = true;
-    });
-    return set;
-  }
-  function populateCalPartChips() {
-    var byPart = {};
-    DB.getExercises().forEach(function (x) { (byPart[x.part] = byPart[x.part] || []).push(x); });
-    var parts = DB.PARTS.filter(function (p) { return byPart[p] && byPart[p].length; });
-    if (!state.calPart) state.calPart = 'ALL';
-    var chips = ['ALL'].concat(parts);
-    $('#calPartChips').innerHTML = chips.map(function (p) {
-      return '<button class="cal-pchip' + (p === state.calPart ? ' active' : '') + '" data-cal-part="' + esc(p) + '" type="button">' + (p === 'ALL' ? 'ALL' : esc(p)) + '</button>';
-    }).join('');
-  }
-  function renderCalendarGrid() {
-    var y = state.calYear, m = state.calMonth;
-    var first = new Date(y, m, 1);
-    var startDow = first.getDay();
-    var daysInMonth = new Date(y, m + 1, 0).getDate();
-    var prevDays = new Date(y, m, 0).getDate();
-    var trained = trainedDates(state.calPart);
-    var color = state.calPart === 'ALL' ? VOLT : (PART_COLOR[state.calPart] || VOLT);
-    var todayStr = DB.todayStr();
-
-    var cells = '';
-    for (var i = 0; i < startDow; i++) {
-      cells += '<span class="cal-day other-month">' + (prevDays - startDow + 1 + i) + '</span>';
-    }
-    for (var d = 1; d <= daysInMonth; d++) {
-      var dateStr = y + '-' + ('0' + (m + 1)).slice(-2) + '-' + ('0' + d).slice(-2);
-      var cls = 'cal-day';
-      var style = '';
-      if (trained[dateStr]) { cls += ' trained'; style = ' style="background:' + color + ';border-color:' + color + '"'; }
-      if (dateStr === todayStr) cls += ' today';
-      cells += '<span class="' + cls + '"' + style + '>' + d + '</span>';
-    }
-    var total = startDow + daysInMonth;
-    var trailing = (7 - (total % 7)) % 7;
-    for (var j = 1; j <= trailing; j++) cells += '<span class="cal-day other-month">' + j + '</span>';
-
-    $('#calGrid').innerHTML = cells;
-    $('#calMonthLabel').textContent = y + '年' + (m + 1) + '月';
-  }
-  function calShiftMonth(delta) {
-    var d = new Date(state.calYear, state.calMonth + delta, 1);
-    state.calYear = d.getFullYear();
-    state.calMonth = d.getMonth();
-    renderCalendarGrid();
-  }
-  function renderCalendar() {
-    if (state.calYear == null) {
-      var t = parseDate(DB.todayStr());
-      state.calYear = t.getFullYear();
-      state.calMonth = t.getMonth();
-    }
-    populateCalPartChips();
-    renderCalendarGrid();
   }
 
   function init() {
     bindOnce();
     populatePartChips();
     renderExWheel();
-    renderCalendar();
     if (state.cardTab === 'exercise') renderExercisePane(); else renderVolumePane();
   }
 

@@ -94,8 +94,6 @@ button { cursor: pointer; }
 
 .page-header { padding: calc(18px + env(safe-area-inset-top)) 0 6px; }
 .page-header h2 { font-size: 22px; font-weight: 800; margin-top: 2px; }
-/* ページ途中に置く見出し（グラフタブ内、カレンダーの下など）はセーフエリア分の余白は不要 */
-.page-header.chart-section-header { padding: 10px 0 6px; }
 
 .date-nav {
   display: flex;
@@ -746,9 +744,70 @@ button { cursor: pointer; }
 }
 .cal-day.other-month { color: #3a3f49; }
 .cal-day.today { border-color: var(--dim); }
-/* 既定の実施日カラー（ボルトイエロー）。グラフ側の部位別カレンダーはJSのインラインstyleで
+/* 既定の実施日カラー（ボルトイエロー）。履歴タブの部位別カレンダーはJSのインラインstyleで
    部位ごとの色に上書きされるため、この既定値は主に記録タブの日付カレンダー（単色）で使われる */
 .cal-day.trained { background: var(--volt); border-color: var(--volt); color: var(--ink); font-weight: 700; }
+
+/* ---- 履歴タブのワークアウトデイ（v0.11.0でグラフタブから移設） ----
+   ここから下の日セル関連は必ず #calGrid で閉じる。.cal-day は記録タブの日付ピッカー
+   （#dateCalGrid）と共用しているため、無スコープで書くとそちらを巻き込む。
+   v0.10.1 で .stepper を無スコープに書いて実際に別画面を壊しているので繰り返さない */
+.hist-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.cal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-bottom: 3px;          /* h2 の下端と目線を合わせる */
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cal-caret { font-size: 11px; line-height: 1; color: var(--volt); transition: transform 0.2s ease; }
+.cal-toggle.closed { color: var(--dim); }
+.cal-toggle.closed .cal-caret { transform: rotate(-90deg); color: var(--dim); }
+.cal-card.collapsed { display: none; }
+
+#calGrid { row-gap: 9px; }     /* 選択リングが上下の行に重ならないぶんだけ空ける */
+#calGrid .cal-day { position: relative; appearance: none; -webkit-appearance: none; }
+#calGrid button.cal-day:active { opacity: 0.55; }
+/* 記録はあるが数値が未入力の日。塗らずに点だけ出して「一覧に出る＝押せる日」だと分かるようにする */
+#calGrid .cal-day.has-rec::after {
+  content: '';
+  position: absolute;
+  bottom: 1px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: var(--dot-color, var(--dim));
+}
+/* 選択中の日。パネル色の隙間を挟んでリングを描く。
+   部位ALLだと塗りもボルトイエローなので、隙間なしではリングが塗りに溶けて消える */
+#calGrid .cal-day.sel { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--volt); }
+
+/* 何で絞り込んでいるかを一覧の上に出すバー。月を送って選択日が画面から消えても、ここを見れば分かる */
+.hist-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px 8px 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.hfb-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.hfb-date { font-size: 14.5px; font-weight: 700; color: var(--text); }
+.hfb-wd { font-size: 11.5px; color: var(--dim); }
+.hfb-txt { font-size: 12px; color: var(--dim); }
 
 /* 種目別グラフ：まず部位を選ぶチップ */
 .chart-part-chips {

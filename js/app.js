@@ -1571,11 +1571,119 @@
   }
 
   /* ================== 履歴タブ ================== */
+  /* ---- ワークアウトデイ（カレンダー） ----
+     v0.11.0でグラフタブから移設した。ここで選んだ「日」と「部位」が、
+     そのまま下の履歴一覧の絞り込みも兼ねる（カレンダーは見るだけのものではなくなった） */
+  var HIST_CAL_OPEN_KEY = 'kintore_hist_cal_open';
+  var VOLT = '#d7ff3e';
+  var histCal = { part: 'ALL', year: null, month: null, date: null, open: true };
+  (function initHistCal() {
+    var t = parseDate(DB.todayStr());
+    histCal.year = t.getFullYear();
+    histCal.month = t.getMonth();
+    /* 開閉だけは端末に残す。選んだ日はアプリを開いている間だけの状態にする（次に開いたら全件から始めたいため） */
+    try { histCal.open = localStorage.getItem(HIST_CAL_OPEN_KEY) !== '0'; } catch (err) { /* 参照できなくても既定の「開」でよい */ }
+  })();
+
+  /* 部位ごとに「記録がある日（has）」と「実際に数値が入っている日（trained）」を集める。
+     has = 一覧に出す日 かつ カレンダーで押せる日、trained = 色で塗る日。
+     2つを分けているのは、種目を足しただけで数値が未入力の日も履歴には出るため。
+     塗られた日だけ押せる作りにすると、一覧に並んでいるのに選べない日ができて理由が分からなくなる */
+  function histDayInfo(part) {
+    var has = {}, trained = {}, dates = [];
+    DB.datesWithData().forEach(function (date) {
+      var w = DB.getWorkout(date);
+      var entries = (w.entries || []).filter(function (e) { return part === 'ALL' || e.part === part; });
+      /* ALLのときはメモやコンディションだけの日も落とさない（従来の履歴に出ていたため） */
+      if (!entries.length && !(part === 'ALL' && (w.memo || w.condition))) return;
+      has[date] = true;
+      dates.push(date);
+      if (entries.some(function (e) { return filledSets(e).length > 0; })) trained[date] = true;
+    });
+    return { has: has, trained: trained, dates: dates };
+  }
+
+  function renderHistCalPartChips() {
+    var byPart = {};
+    DB.getExercises().forEach(function (x) { (byPart[x.part] = byPart[x.part] || []).push(x); });
+    var chips = ['ALL'].concat(DB.PARTS.filter(function (p) { return byPart[p] && byPart[p].length; }));
+    if (chips.indexOf(histCal.part) < 0) histCal.part = 'ALL';  /* 絞り込み中の部位の種目が全部消えたとき */
+    $('#calPartChips').innerHTML = chips.map(function (p) {
+      return '<button class="cal-pchip' + (p === histCal.part ? ' active' : '') +
+        '" data-cal-part="' + esc(p) + '" type="button">' + esc(p) + '</button>';
+    }).join('');
+  }
+
+  function renderHistCalendar() {
+    var y = histCal.year, m = histCal.month;
+    var startDow = new Date(y, m, 1).getDay();
+    var daysInMonth = new Date(y, m + 1, 0).getDate();
+    var prevDays = new Date(y, m, 0).getDate();
+    var info = histDayInfo(histCal.part);
+    var color = histCal.part === 'ALL' ? VOLT : (DB.PART_COLOR[histCal.part] || VOLT);
+    var today = DB.todayStr();
+
+    var cells = '';
+    for (var i = 0; i < startDow; i++) {
+      cells += '<span class="cal-day other-month">' + (prevDays - startDow + 1 + i) + '</span>';
+    }
+    for (var d = 1; d <= daysInMonth; d++) {
+      var ds = y + '-' + ('0' + (m + 1)).slice(-2) + '-' + ('0' + d).slice(-2);
+      var cls = 'cal-day', style = '';
+      if (info.trained[ds]) { cls += ' trained'; style = ' style="background:' + color + ';border-color:' + color + '"'; }
+      else if (info.has[ds]) { cls += ' has-rec'; style = ' style="--dot-color:' + color + '"'; }
+      if (ds === today) cls += ' today';
+      if (ds === histCal.date) cls += ' sel';
+      /* 記録のある日だけ button にする。記録のない日・未来日は span のままで押せない */
+      cells += info.has[ds]
+        ? '<button type="button" class="' + cls + '" data-cal-date="' + ds + '"' + style +
+            ' aria-pressed="' + (ds === histCal.date ? 'true' : 'false') + '">' + d + '</button>'
+        : '<span class="' + cls + '">' + d + '</span>';
+    }
+    var trailing = (7 - ((startDow + daysInMonth) % 7)) % 7;
+    for (var j = 1; j <= trailing; j++) cells += '<span class="cal-day other-month">' + j + '</span>';
+
+    $('#calGrid').innerHTML = cells;
+    $('#calMonthLabel').textContent = y + '年' + (m + 1) + '月';
+  }
+
+  /* 何で絞り込んでいるかを一覧の上に出す。月を移動して選択日が画面から消えても、ここを見れば分かる */
+  function renderHistFilterBar() {
+    var bits = [];
+    if (histCal.date) {
+      var d = parseDate(histCal.date);
+      bits.push('<span class="hfb-date num">' + d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate() +
+        '</span><span class="hfb-wd">(' + WD[d.getDay()] + ')</span>');
+    }
+    if (histCal.part !== 'ALL') bits.push(partChip(histCal.part));
+    if (!bits.length) { $('#histFilterBar').innerHTML = ''; return; }
+    $('#histFilterBar').innerHTML = '<div class="hist-filter-bar">' +
+      '<span class="hfb-main">' + bits.join('') + '<span class="hfb-txt">の記録</span></span>' +
+      '<button class="link" data-action="hist-clear" type="button">すべて表示</button></div>';
+  }
+
+  function applyHistCalOpen() {
+    $('#calCard').classList.toggle('collapsed', !histCal.open);
+    $('#calToggle').classList.toggle('closed', !histCal.open);
+    $('#calToggle').setAttribute('aria-expanded', histCal.open ? 'true' : 'false');
+  }
+
   function renderHistory() {
-    var dates = DB.datesWithData().slice().reverse();
+    applyHistCalOpen();
+    renderHistCalPartChips();
+    renderHistCalendar();
+    renderHistFilterBar();
+    renderHistoryList();
+  }
+
+  function renderHistoryList() {
+    var info = histDayInfo(histCal.part);
+    var dates = info.dates.slice().reverse();
+    if (histCal.date) dates = dates.filter(function (x) { return x === histCal.date; });
     if (!dates.length) {
-      $('#historyList').innerHTML =
-        '<div class="placeholder"><div class="ph-icon">📓</div><p>まだ記録がありません</p></div>';
+      var filtering = histCal.date || histCal.part !== 'ALL';
+      $('#historyList').innerHTML = '<div class="placeholder"><div class="ph-icon">📓</div><p>' +
+        (filtering ? '該当する記録がありません' : 'まだ記録がありません') + '</p></div>';
       return;
     }
     var html = '';
@@ -1626,7 +1734,48 @@
     '</div>';
   }
 
+  function shiftHistMonth(delta) {
+    var d = new Date(histCal.year, histCal.month + delta, 1);
+    histCal.year = d.getFullYear();
+    histCal.month = d.getMonth();
+    renderHistCalendar();   /* 月を動かしても選択日と一覧はそのまま（上のバーに何で絞っているか出ている） */
+  }
+
+  /* 選んだ日だけを一覧に出す。同じ日をもう一度押したら解除 */
+  function selectHistDate(date) {
+    histCal.date = (histCal.date === date) ? null : date;
+    if (histCal.date) ui.expanded[histCal.date] = true;   /* 選んだ日は中身まで開いて見せる */
+    renderHistory();
+  }
+
   function bindHistory() {
+    $('#calToggle').addEventListener('click', function () {
+      histCal.open = !histCal.open;
+      applyHistCalOpen();
+      try { localStorage.setItem(HIST_CAL_OPEN_KEY, histCal.open ? '1' : '0'); } catch (err) { /* 保存できなくても表示には支障がない */ }
+    });
+    $('#calPrev').addEventListener('click', function () { shiftHistMonth(-1); });
+    $('#calNext').addEventListener('click', function () { shiftHistMonth(1); });
+    $('#calGrid').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-cal-date]');
+      if (b) selectHistDate(b.dataset.calDate);
+    });
+    $('#calPartChips').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-cal-part]');
+      if (!b) return;
+      histCal.part = b.dataset.calPart;
+      /* 部位を変えた結果その日が対象外になったら選択を外す。
+         残したままだと「空の一覧」だけが出て、なぜ0件なのか分からなくなる */
+      if (histCal.date && !histDayInfo(histCal.part).has[histCal.date]) histCal.date = null;
+      renderHistory();
+    });
+    $('#histFilterBar').addEventListener('click', function (e) {
+      if (!e.target.closest('[data-action="hist-clear"]')) return;
+      histCal.date = null;
+      histCal.part = 'ALL';
+      renderHistory();
+    });
+
     $('#historyList').addEventListener('click', function (e) {
       var card = e.target.closest('.h-card');
       if (!card) return;
@@ -1640,6 +1789,7 @@
           if (confirm(date + ' の記録をすべて削除しますか？')) {
             DB.deleteWorkout(date);
             delete ui.expanded[date];
+            if (histCal.date === date) histCal.date = null;  /* 消した日を選んだままだと0件表示になる */
             renderHistory();
             toast('削除しました');
           }

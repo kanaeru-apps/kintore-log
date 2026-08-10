@@ -17,7 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.10.1">
+<link rel="stylesheet" href="css/style.css?v=0.11.0">
 </head>
 <body>
 <div id="app">
@@ -44,15 +44,14 @@
 
     <!-- ============ 履歴 ============ -->
     <section id="view-history" class="view">
-      <header class="page-header"><p class="eyebrow">HISTORY</p><h2>履歴</h2></header>
-      <div id="historyList"></div>
-    </section>
+      <header class="page-header hist-header">
+        <div><p class="eyebrow">HISTORY</p><h2>履歴</h2></div>
+        <button class="cal-toggle" id="calToggle" type="button" aria-expanded="true" aria-controls="calCard">
+          <span class="cal-toggle-label">ワークアウトデイ</span><span class="cal-caret" aria-hidden="true">▾</span>
+        </button>
+      </header>
 
-    <!-- ============ グラフ ============ -->
-    <section id="view-charts" class="view">
-      <header class="page-header"><p class="eyebrow">ANALYTICS</p><h2>ワークアウトデイ</h2></header>
-
-      <div class="cal-card">
+      <div class="cal-card" id="calCard">
         <div class="cal-part-chips" id="calPartChips"></div>
         <div class="cal-header">
           <button class="cal-nav" id="calPrev" type="button" aria-label="前の月">‹</button>
@@ -65,7 +64,13 @@
         <div class="cal-grid" id="calGrid"></div>
       </div>
 
-      <header class="page-header chart-section-header"><h2>グラフ・レポート</h2></header>
+      <div id="histFilterBar"></div>
+      <div id="historyList"></div>
+    </section>
+
+    <!-- ============ グラフ ============ -->
+    <section id="view-charts" class="view">
+      <header class="page-header"><p class="eyebrow">ANALYTICS</p><h2>グラフ・レポート</h2></header>
 
       <div class="chart-tabs">
         <button class="chart-tab active" data-ctab="exercise" type="button">種目別</button>
@@ -251,7 +256,7 @@
 
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレ記録 v0.10.1 — Phase 7</p>
+      <p class="version">筋トレ記録 v0.11.0 — Phase 7</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -500,9 +505,9 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.10.1"></script>
-<script src="js/app.js?v=0.10.1"></script>
-<script src="js/charts.js?v=0.10.1"></script>
+<script src="js/db.js?v=0.11.0"></script>
+<script src="js/app.js?v=0.11.0"></script>
+<script src="js/charts.js?v=0.11.0"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});

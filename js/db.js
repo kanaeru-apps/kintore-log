@@ -9,6 +9,13 @@
 var DB = (function () {
   var KEY = 'kintore_v1';
   var PARTS = ['胸', '背中', '脚', '肩', '腕', '腹', '有酸素', 'その他'];
+  /* 記録画面の部位チップ（.p-xxx）と同じ配色。グラフの線色とカレンダーの塗りで共用する。
+     app.js と charts.js の両方が使うため、部位の情報を持つここに置く（2か所にコピーすると
+     色を変えたとき片方だけ直す事故になる）。有酸素はキーを持たず、使う側でボルトイエローに落ちる */
+  var PART_COLOR = {
+    '胸': '#ff8484', '背中': '#74b6ff', '脚': '#ffbc57', '肩': '#c9a4ff',
+    '腕': '#62e3cb', '腹': '#ff9ec4', 'その他': '#9ba0a8'
+  };
   var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重'];
   var CARDIO_PART = '有酸素';
   /* 有酸素セットのフィールド：時間(t/分)・秒(ts/0-59)・距離(d/km)・速度(sp/km/h)・傾斜(inc/%)・カロリー(cal/kcal)・心拍(hr/bpm)
@@ -271,6 +278,7 @@ var DB = (function () {
 
   return {
     PARTS: PARTS,
+    PART_COLOR: PART_COLOR,
     EQUIPS: EQUIPS,
     todayStr: todayStr,
 
