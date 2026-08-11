@@ -1,7 +1,7 @@
 {
   "name": "kintore-log",
   "version": "1.0.0",
-  "description": "筋トレ記録 - iOS app (Capacitor wrapper for the PWA)",
+  "description": "筋トレLog - iOS app (Capacitor wrapper for the PWA)",
   "private": true,
   "scripts": {
     "build": "node build-ios.js",

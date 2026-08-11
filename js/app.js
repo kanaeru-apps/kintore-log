@@ -2287,7 +2287,7 @@
       ln.schedule({
         notifications: [{
           id: TIMER_NOTIF_ID,
-          title: '筋トレ記録',
+          title: '筋トレLog',
           body: '休憩終了！ 次のセットへ',
           schedule: { at: new Date(endAtMs), allowWhileIdle: true }
         }]
@@ -2594,7 +2594,7 @@
     var blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv' }); // BOM付きでExcel文字化け防止
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = '筋トレ記録_' + DB.todayStr() + '.csv';
+    a.download = '筋トレLog_' + DB.todayStr() + '.csv';
     document.body.appendChild(a);
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
@@ -3098,9 +3098,9 @@
       if (!('Notification' in window) || Notification.permission !== 'granted') return;
       var opts = { body: '休憩終了！ 次のセットへ', tag: 'kintore-timer', renotify: true, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png' };
       if (navigator.serviceWorker && navigator.serviceWorker.ready) {
-        navigator.serviceWorker.ready.then(function (reg) { reg.showNotification('筋トレ記録', opts); }).catch(function () {});
+        navigator.serviceWorker.ready.then(function (reg) { reg.showNotification('筋トレLog', opts); }).catch(function () {});
       } else {
-        new Notification('筋トレ記録', opts);
+        new Notification('筋トレLog', opts);
       }
     } catch (e) { /* noop */ }
   }

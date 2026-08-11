@@ -1,6 +1,6 @@
 {
-  "name": "筋トレ記録",
-  "short_name": "筋トレ",
+  "name": "筋トレLog",
+  "short_name": "筋トレLog",
   "description": "シンプルで速い筋トレ記録アプリ",
   "lang": "ja",
   "start_url": "./",

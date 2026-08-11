@@ -1,6 +1,6 @@
 {
   "appId": "com.kanaeru.kintore",
-  "appName": "筋トレ記録",
+  "appName": "筋トレLog",
   "webDir": "www",
   "ios": {
     "contentInset": "never"

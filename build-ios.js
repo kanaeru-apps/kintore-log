@@ -185,7 +185,9 @@ if (!built.includes('FEEDBACK_GAS_URL')) {
   console.error('\n[警告] ご意見・ご要望フォームのURLが見当たりません。意図した変更か確認してください。\n');
 }
 
-const version = (html.match(/筋トレ記録 v([\d.]+)/) || [])[1] || '不明';
+/* バージョンは class="version" の行から抜く。以前はアプリ名をそのまま正規表現に書いていたが、
+   App名を変えた瞬間に「不明」になったので、名前ではなく構造を目印にしている */
+const version = (html.match(/class="version">[^<]*?v([\d.]+)/) || [])[1] || '不明';
 console.log(`\n✓ www/ を生成しました（v${version}）`);
 console.log(`  - クラウド同期をスタブに差し替え（${blocks.length}ブロック除去）`);
 console.log('  - Service Worker 登録を除去');

@@ -55,7 +55,7 @@ function doPost(e) {
     try {
       MailApp.sendEmail({
         to: notifyEmail_(),
-        subject: '【筋トレ記録】新しいご意見が届きました',
+        subject: '【筋トレLog】新しいご意見が届きました',
         body: '受信日時: ' + now + '\n' +
               'アプリバージョン: ' + version + '\n' +
               '連絡先: ' + (email || '（記入なし）') + '\n\n' +
