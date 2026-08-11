@@ -2343,7 +2343,36 @@
      ネイティブ版では「終了時刻に通知する」ようOSへ予約しておき、アプリが動いていなくても知らせる。
      予約は開始・時間延長・再開のたびに取り直し、停止・終了時に取り消す。 */
   var TIMER_NOTIF_ID = 1;
+  var TEST_NOTIF_ID = 2;
   var notifPermissionAsked = false;
+
+  function errText(e) {
+    if (!e) return '理由不明';
+    return String(e.message || e.errorMessage || e).slice(0, 90);
+  }
+  function hhmmss(d) {
+    function p(n) { return ('0' + n).slice(-2); }
+    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+
+  /* OSが実際に予約を受け取ったかを確認する。
+     schedule() が成功しても、日時の受け渡しがおかしければここで空になるので、
+     「予約したつもり」と「本当に予約できた」を分けて見られるようにする。 */
+  function refreshPendingDiag() {
+    var ln = nativePlugin('LocalNotifications');
+    if (!isNativeApp() || !ln) { soundDiag.pending = '—（ブラウザ版）'; return Promise.resolve(); }
+    return ln.getPending()
+      .then(function (r) {
+        var list = (r && r.notifications) || [];
+        if (!list.length) { soundDiag.pending = '0件（OSに予約なし）'; return; }
+        soundDiag.pending = list.length + '件: ' + list.map(function (n) {
+          var at = n && n.schedule && n.schedule.at ? new Date(n.schedule.at) : null;
+          var when = (at && !isNaN(at.getTime())) ? hhmmss(at) : '時刻不明';
+          return '#' + n.id + ' ' + when;
+        }).join(' / ');
+      })
+      .catch(function (e) { soundDiag.pending = 'NG: ' + errText(e); });
+  }
 
   function ensureNotifPermission() {
     var ln = nativePlugin('LocalNotifications');
@@ -2360,27 +2389,72 @@
       .catch(function () { return false; });
   }
 
+  /* 通知の予約データを組み立てる。タイマー用とテスト用で中身を揃えるため共通化する。 */
+  function buildNotif(id, body, at) {
+    var notif = {
+      id: id,
+      title: '筋トレLog',
+      body: body,
+      schedule: { at: at, allowWhileIdle: true }
+    };
+    /* sound を渡さないと content.sound が nil のまま＝音の出ない通知になる。
+       「アプリを閉じていると鳴らない」のはこれが原因だった。
+       コピーに失敗していてもファイル名は渡す（見つからない場合iOSは既定の通知音を鳴らすため、
+       何も指定せず確実に無音になるより良い）。 */
+    if (timerSettings.soundOn) notif.sound = alarmFileName(timerSettings.sound);
+    return notif;
+  }
+
+  /* 予約の結果は必ず soundDiag.sched に残す。
+     ここを無言のreturnと空catchで捨てていたため、実機で「通知が出ない」と言われても
+     予約に失敗しているのか許可が下りていないのかを切り分けられなかった。 */
   function scheduleTimerNotification(endAtMs) {
     var ln = nativePlugin('LocalNotifications');
-    if (!isNativeApp() || !ln) return;
-    if (!timerSettings.notifyOn) return;
+    if (!isNativeApp()) { soundDiag.sched = '—（ブラウザ版）'; return; }
+    if (!ln) { soundDiag.sched = 'NG: 通知プラグインが読み込まれていない'; return; }
+    if (!timerSettings.notifyOn) { soundDiag.sched = '—（システム通知がOFF）'; return; }
     cancelTimerNotification();
+    soundDiag.sched = '予約中…';
     Promise.all([ensureNotifPermission(), ensureNotificationSounds()]).then(function (r) {
-      if (!r[0]) return;
-      if (endAtMs <= Date.now()) return;
-      var notif = {
-        id: TIMER_NOTIF_ID,
-        title: '筋トレLog',
-        body: '休憩終了！ 次のセットへ',
-        schedule: { at: new Date(endAtMs), allowWhileIdle: true }
-      };
-      /* sound を渡さないと content.sound が nil のまま＝音の出ない通知になる。
-         「アプリを閉じていると鳴らない」のはこれが原因だった。
-         コピーに失敗していてもファイル名は渡す（見つからない場合iOSは既定の通知音を鳴らすため、
-         何も指定せず確実に無音になるより良い）。 */
-      if (timerSettings.soundOn) notif.sound = alarmFileName(timerSettings.sound);
-      ln.schedule({ notifications: [notif] }).catch(function () { /* noop */ });
-    });
+      if (!r[0]) { soundDiag.sched = 'NG: 通知が許可されていない'; return; }
+      if (endAtMs <= Date.now()) { soundDiag.sched = 'NG: 終了時刻が過去'; return; }
+      var at = new Date(endAtMs);
+      var notif = buildNotif(TIMER_NOTIF_ID, '休憩終了！ 次のセットへ', at);
+      return ln.schedule({ notifications: [notif] })
+        .then(function () {
+          soundDiag.sched = 'OK ' + hhmmss(at) + ' / ' + (notif.sound || '音なし');
+          return refreshPendingDiag();
+        })
+        .catch(function (e) { soundDiag.sched = 'NG: ' + errText(e); });
+    }).catch(function (e) { soundDiag.sched = 'NG: ' + errText(e); });
+  }
+
+  /* 設定画面の「通知テスト」。タイマーを5分回さなくても10秒で試せるようにする。 */
+  function runNotifTest() {
+    var out = $('#testNotifResult');
+    function say(t) { if (out) out.textContent = t; }
+    var ln = nativePlugin('LocalNotifications');
+    if (!isNativeApp() || !ln) { say('ブラウザ版では試せません（アプリ版のみ）'); return; }
+    say('準備中…');
+    Promise.all([ensureNotifPermission(), ensureNotificationSounds()]).then(function (r) {
+      if (!r[0]) {
+        say('NG: 通知が許可されていません。iPhoneの「設定 > 通知 > 筋トレLog」を開いて「通知を許可」をONにしてください');
+        return renderSoundDiag();
+      }
+      var at = new Date(Date.now() + 10000);
+      var notif = buildNotif(TEST_NOTIF_ID, 'テスト通知です（10秒後）', at);
+      return ln.schedule({ notifications: [notif] })
+        .then(function () {
+          say('予約OK。' + hhmmss(at) + ' に鳴ります。今すぐホーム画面に戻るか画面を消して待ってください');
+          soundDiag.sched = 'テストOK ' + hhmmss(at) + ' / ' + (notif.sound || '音なし');
+          return refreshPendingDiag().then(renderSoundDiag);
+        })
+        .catch(function (e) {
+          say('NG: 予約に失敗しました（' + errText(e) + '）');
+          soundDiag.sched = 'テストNG: ' + errText(e);
+          renderSoundDiag();
+        });
+    }).catch(function (e) { say('NG: ' + errText(e)); });
   }
 
   function cancelTimerNotification() {
@@ -2988,8 +3062,10 @@
   function alarmFileName(key) { return key + '.wav'; }
   function alarmSrc(key) { return 'sounds/' + alarmFileName(key); }
 
-  /* 「音が鳴らない」と言われたときに設定画面で状態を見せるための記録（診断表示用） */
-  var soundDiag = { play: '未実行', notif: '未実行', session: '未実行' };
+  /* 「音が鳴らない」と言われたときに設定画面で状態を見せるための記録（診断表示用）。
+     sched / pending は「アプリを閉じているときの通知」が出なかったときに、
+     予約そのものが失敗したのか・OSまで届いているのかを切り分けるためのもの。 */
+  var soundDiag = { play: '未実行', notif: '未実行', session: '未実行', sched: '未実行', pending: '未確認' };
   var SILENT_WAV_URL = (function () {
     // 1chモノラル・8kHz・16bit・約0.05秒(400サンプル)の無音WAV。ArrayBufferは既定でゼロ埋めなのでそのまま無音になる
     var sampleRate = 8000, samples = 400, dataSize = samples * 2;
@@ -3453,6 +3529,8 @@
     $('#diagPlay').textContent = soundDiag.play;
     $('#diagNotif').textContent = soundDiag.notif;
     $('#diagSession').textContent = soundDiag.session;
+    $('#diagSched').textContent = soundDiag.sched;
+    $('#diagPending').textContent = soundDiag.pending;
     var permEl = $('#diagPerm');
     permEl.textContent = '確認中…';
     var ln = nativePlugin('LocalNotifications');
@@ -3460,6 +3538,8 @@
     ln.checkPermissions()
       .then(function (r) { permEl.textContent = (r && r.display) || '不明'; })
       .catch(function () { permEl.textContent = 'NG: 確認できず'; });
+    // 予約状況はOSに聞かないと分からないので、画面を開くたびに取り直す
+    refreshPendingDiag().then(function () { $('#diagPending').textContent = soundDiag.pending; });
   }
   var timerSettingsBound = false;
   function bindTimerSettingsOnce() {
@@ -3510,6 +3590,8 @@
       }
       setTimeout(renderSoundDiag, 400);
     });
+    var testBtn = $('#testNotifBtn');
+    if (testBtn) testBtn.addEventListener('click', runNotifTest);
   }
 
   /* ================== タブ切り替え・初期化 ================== */
