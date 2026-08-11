@@ -2254,6 +2254,90 @@
       });
   }
 
+  /* ---- 消音モード（サイレントスイッチ）の扱い ----
+     WKWebViewの音は既定でサイレントスイッチに従うため、消音のままトレーニングしていると
+     アプリを開いていてもアラームが鳴らない。ネイティブ側の AVAudioSession を
+     .playback にすると消音でも鳴るようになる（AlarmAudioプラグイン＝AppDelegate.swift）。
+     プラグインが無い／古いビルドでは reject されるが、AppDelegate 側が起動時に
+     .playback を張っているので「鳴る」状態が既定になる（設定が効かないだけで無音にはならない）。 */
+  function applySilentModeSetting() {
+    if (!isNativeApp()) { soundDiag.session = '—（ブラウザ版）'; return Promise.resolve(false); }
+    var pl = nativePlugin('AlarmAudio');
+    if (!pl) { soundDiag.session = 'NG: プラグイン未登録'; return Promise.resolve(false); }
+    return pl.setIgnoreSilentMode({ value: !!timerSettings.ignoreSilent })
+      .then(function (r) {
+        soundDiag.session = (r && r.category ? r.category : (timerSettings.ignoreSilent ? 'playback' : 'ambient'));
+        return true;
+      })
+      .catch(function () { soundDiag.session = 'NG: 呼び出し失敗'; return false; });
+  }
+
+  /* ---- 通知音として使うWAVを Library/Sounds/ へ置く ----
+     UNNotificationSound はファイル名しか受け取れず、探しに行く先は
+     アプリ本体のbundle直下か Library/Sounds/ の2箇所だけ。
+     Capacitorのweb資産は bundle の public/ 配下に入るので通知からは参照できない。
+     そこで初回起動時に sounds/*.wav を Library/Sounds/ へコピーしておく。
+     音源を作り直したら ALARM_ASSET_VERSION を上げてコピーし直させること。 */
+  var ALARM_ASSET_VERSION = '1';
+  var ALARM_ASSET_KEY = 'kintore_notif_sound_ver';
+  var notifSoundsReady = false;
+  var notifSoundsPromise = null;
+
+  /* コピーは起動時に1回走らせるが、通知を予約する側もこれを待つ。
+     コピー前に予約してしまうと、その回だけ音の無い通知になるため。 */
+  function ensureNotificationSounds() {
+    if (!notifSoundsPromise) notifSoundsPromise = installNotificationSounds();
+    return notifSoundsPromise;
+  }
+
+  function installNotificationSounds() {
+    var fsPlugin = nativePlugin('Filesystem');
+    if (!isNativeApp() || !fsPlugin) { soundDiag.notif = '—（ブラウザ版）'; return Promise.resolve(false); }
+    var done = '';
+    try { done = localStorage.getItem(ALARM_ASSET_KEY) || ''; } catch (e) { /* noop */ }
+    if (done === ALARM_ASSET_VERSION) {
+      notifSoundsReady = true;
+      soundDiag.notif = 'OK (コピー済み)';
+      return Promise.resolve(true);
+    }
+    // 5本まとめてbase64にするとメモリを食うので1本ずつ順番に書く
+    var chain = Promise.resolve();
+    SOUND_PATTERNS.forEach(function (p) {
+      chain = chain.then(function () { return copySoundToLibrary(fsPlugin, p.key); });
+    });
+    return chain.then(function () {
+      notifSoundsReady = true;
+      try { localStorage.setItem(ALARM_ASSET_KEY, ALARM_ASSET_VERSION); } catch (e) { /* noop */ }
+      soundDiag.notif = 'OK (今回コピー)';
+      return true;
+    }).catch(function () {
+      // 失敗しても通知そのものは出る（音がOS既定になるだけ）。次の起動で再試行される
+      soundDiag.notif = 'NG: コピー失敗';
+      return false;
+    });
+  }
+
+  function copySoundToLibrary(fsPlugin, key) {
+    return fetch(alarmSrc(key))
+      .then(function (r) {
+        if (!r.ok) throw new Error('sound not found');
+        return r.arrayBuffer();
+      })
+      .then(function (buf) {
+        var bytes = new Uint8Array(buf), bin = '', CHUNK = 0x8000;
+        // apply の引数上限に当たるため分割して文字列化する
+        for (var i = 0; i < bytes.length; i += CHUNK) {
+          bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+        }
+        return fsPlugin.writeFile({
+          path: 'Sounds/' + alarmFileName(key),
+          data: btoa(bin),
+          directory: 'LIBRARY',
+          recursive: true
+        });
+      });
+  }
+
   /* ---- タイマーのローカル通知 ----
      PWAは画面ロック中・バックグラウンドではJSが止まるため、終了時に鳴らそうとしても鳴らない。
      ネイティブ版では「終了時刻に通知する」ようOSへ予約しておき、アプリが動いていなくても知らせる。
@@ -2281,17 +2365,21 @@
     if (!isNativeApp() || !ln) return;
     if (!timerSettings.notifyOn) return;
     cancelTimerNotification();
-    ensureNotifPermission().then(function (ok) {
-      if (!ok) return;
+    Promise.all([ensureNotifPermission(), ensureNotificationSounds()]).then(function (r) {
+      if (!r[0]) return;
       if (endAtMs <= Date.now()) return;
-      ln.schedule({
-        notifications: [{
-          id: TIMER_NOTIF_ID,
-          title: '筋トレLog',
-          body: '休憩終了！ 次のセットへ',
-          schedule: { at: new Date(endAtMs), allowWhileIdle: true }
-        }]
-      }).catch(function () { /* noop */ });
+      var notif = {
+        id: TIMER_NOTIF_ID,
+        title: '筋トレLog',
+        body: '休憩終了！ 次のセットへ',
+        schedule: { at: new Date(endAtMs), allowWhileIdle: true }
+      };
+      /* sound を渡さないと content.sound が nil のまま＝音の出ない通知になる。
+         「アプリを閉じていると鳴らない」のはこれが原因だった。
+         コピーに失敗していてもファイル名は渡す（見つからない場合iOSは既定の通知音を鳴らすため、
+         何も指定せず確実に無音になるより良い）。 */
+      if (timerSettings.soundOn) notif.sound = alarmFileName(timerSettings.sound);
+      ln.schedule({ notifications: [notif] }).catch(function () { /* noop */ });
     });
   }
 
@@ -2804,7 +2892,7 @@
     total: 0, endAt: 0, remaining: 0,
     running: false, paused: false, finished: false,
     tick: null, wakeLock: null, audioCtx: null, beepNodes: [],
-    audioElUnlocked: false, alarmBlobUrl: null,
+    audioElUnlocked: false, previewStop: null, vibrateTimer: null,
     customMin: 3,
     twBuilt: false, twBound: false, twSel: -1
   };
@@ -2816,7 +2904,10 @@
     { key: 'digital', label: '電子音' },
     { key: 'soft', label: 'ソフト' }
   ];
-  var timerSettings = { sound: 'beep', soundOn: true, vibrateOn: true, notifyOn: true };
+  /* ignoreSilent: 本体側面のサイレントスイッチ（消音モード）を無視して鳴らすか。
+     既定ON＝トレーニング中は消音のままの人が多く、鳴らないと目的を果たさないため。
+     OFFにすると通常の動画アプリと同じ挙動（消音スイッチに従う）に戻る。ネイティブ版のみ有効。 */
+  var timerSettings = { sound: 'beep', soundOn: true, vibrateOn: true, notifyOn: true, ignoreSilent: true };
 
   function loadTimerSettings() {
     try {
@@ -2828,6 +2919,8 @@
       if (vib !== null) timerSettings.vibrateOn = vib === '1';
       var nt = localStorage.getItem('kintore_timer_notify_on');
       if (nt !== null) timerSettings.notifyOn = nt === '1';
+      var sl = localStorage.getItem('kintore_timer_ignore_silent');
+      if (sl !== null) timerSettings.ignoreSilent = sl === '1';
     } catch (e) { /* noop */ }
   }
   function saveTimerSettings() {
@@ -2836,6 +2929,7 @@
       localStorage.setItem('kintore_timer_sound_on', timerSettings.soundOn ? '1' : '0');
       localStorage.setItem('kintore_timer_vibrate_on', timerSettings.vibrateOn ? '1' : '0');
       localStorage.setItem('kintore_timer_notify_on', timerSettings.notifyOn ? '1' : '0');
+      localStorage.setItem('kintore_timer_ignore_silent', timerSettings.ignoreSilent ? '1' : '0');
     } catch (e) { /* noop */ }
   }
 
@@ -2878,15 +2972,24 @@
     return Math.max(0, Math.min(TW_MAX_MIN - 1, idx));
   }
 
-  /* ---- 音（<audio>要素方式。iOS SafariはWeb Audio API(AudioContext)よりも
-     <audio>要素のほうがバックグラウンド再生中の他アプリ(Amazon Audible等)と
-     共存しやすい傾向があるため、オシレーターで合成した音をOfflineAudioContextで
-     レンダリング→WAVエンコードし、<audio>要素で再生する。
+  /* ---- 音（同梱WAVファイルを<audio>要素で再生する方式） ----
+     以前はオシレーターの合成音をOfflineAudioContextでレンダリング→Blob URL化して
+     再生していたが、この経路は「レンダリング成功」「Blob URLの再生可否」という
+     iOS WKWebView 依存の不確実な段を2つ挟むため、鳴らないときに原因を切り分けられない。
+     いまは sounds/*.wav（tools/gen_alarm_wav.py が生成する実ファイル）を直接指すだけにして、
+     再生経路を「ファイルを指す→play()」の1段に減らしている。
+     同じファイルをローカル通知の音にも使うので、アプリが閉じていても開いていても
+     同じ音が鳴る（通知用は Library/Sounds/ へコピーする。installNotificationSounds 参照）。
+
      タップ時（unlockAudio）に、無音の短いWAVをユーザー操作の同期コールスタック内で
-     一度再生→即停止してアンロックしておく（iOSはユーザー操作から非同期処理を挟んだ
-     後のplay()を許可しないことが多いため、実アラーム音のレンダリング完了を待たずに
-     即座にアンロックする必要がある）。実アラーム音は同時に非同期でレンダリングし
-     キャッシュしておき、タイマー終了時はそのキャッシュを同じ<audio>要素で再生する。 ---- */
+     一度再生→即停止してアンロックしておく。iOSはユーザー操作から非同期処理を挟んだ
+     後のplay()を許可しないことが多いため、実ファイルの読み込み完了を待たずに
+     即座にアンロックしてから、実ファイルを裏で読み込ませる。 ---- */
+  function alarmFileName(key) { return key + '.wav'; }
+  function alarmSrc(key) { return 'sounds/' + alarmFileName(key); }
+
+  /* 「音が鳴らない」と言われたときに設定画面で状態を見せるための記録（診断表示用） */
+  var soundDiag = { play: '未実行', notif: '未実行', session: '未実行' };
   var SILENT_WAV_URL = (function () {
     // 1chモノラル・8kHz・16bit・約0.05秒(400サンプル)の無音WAV。ArrayBufferは既定でゼロ埋めなのでそのまま無音になる
     var sampleRate = 8000, samples = 400, dataSize = samples * 2;
@@ -2915,83 +3018,66 @@
         var el = $('#timerAlarmAudio');
         if (el) {
           el.src = SILENT_WAV_URL;
-          var finish = function () { try { el.pause(); el.currentTime = 0; } catch (e2) { /* noop */ } };
+          var finish = function () {
+            /* 解錠の再生が終わるまでの間に本命の再生が始まっていたら何もしない。
+               設定画面で音色をタップした直後（解錠と試聴が同時に走る）に
+               ここで pause してしまうと、試聴が一瞬で止まってしまう。 */
+            if (el.getAttribute('data-sound')) return;
+            try { el.pause(); el.currentTime = 0; } catch (e2) { /* noop */ }
+            setAlarmSource(timerSettings.sound); // 無音での解錠が済んでから本命を読み込ませる
+          };
           var p = el.play();
           if (p && p.then) p.then(finish).catch(finish); else finish();
           timer.audioElUnlocked = true;
         }
       } catch (e) { /* noop */ }
+    } else {
+      setAlarmSource(timerSettings.sound);
     }
-    prerenderAlarm(timerSettings.sound);
+    applySilentModeSetting();
   }
 
-  /* AudioBuffer(モノラル前提) → 16bit PCM WAVのBlobにエンコード */
-  function audioBufferToWavBlob(buffer) {
-    var numCh = buffer.numberOfChannels, len = buffer.length, sampleRate = buffer.sampleRate;
-    var blockAlign = numCh * 2, dataSize = len * blockAlign;
-    var ab = new ArrayBuffer(44 + dataSize);
-    var view = new DataView(ab);
-    function writeStr(off, s) { for (var i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); }
-    writeStr(0, 'RIFF'); view.setUint32(4, 36 + dataSize, true); writeStr(8, 'WAVE');
-    writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
-    view.setUint16(22, numCh, true); view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * blockAlign, true); view.setUint16(32, blockAlign, true); view.setUint16(34, 16, true);
-    writeStr(36, 'data'); view.setUint32(40, dataSize, true);
-    var channels = [];
-    for (var c = 0; c < numCh; c++) channels.push(buffer.getChannelData(c));
-    var offset = 44;
-    for (var i = 0; i < len; i++) {
-      for (var c2 = 0; c2 < numCh; c2++) {
-        var s = Math.max(-1, Math.min(1, channels[c2][i]));
-        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-        offset += 2;
-      }
+  /* <audio>要素の src を選択中の音色に合わせる（同じなら何もしない＝読み込み直しを避ける） */
+  function setAlarmSource(key) {
+    var el = $('#timerAlarmAudio');
+    if (!el) return null;
+    if (el.getAttribute('data-sound') !== key) {
+      el.setAttribute('data-sound', key);
+      el.src = alarmSrc(key);
+      try { el.load(); } catch (e) { /* noop */ }
     }
-    return new Blob([ab], { type: 'audio/wav' });
+    return el;
   }
 
-  /* 各音色パターンの再生時間（レンダリング用バッファ長。余裕を持たせた固定値） */
-  function patternDuration(key, full) {
-    if (key === 'bell') return full ? 6.0 : 1.5;
-    if (key === 'chime') return full ? 6.0 : 1.5;
-    if (key === 'digital') return full ? 5.0 : 1.0;
-    if (key === 'soft') return full ? 5.5 : 1.0;
-    return full ? 5.5 : 1.2; // beep
-  }
-
-  /* 選んだ音色パターンをOfflineAudioContextでレンダリングしAudioBufferを返す */
-  function renderAlarmBuffer(key, full) {
-    var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    if (!OAC) return Promise.reject(new Error('OfflineAudioContext not supported'));
-    var dur = patternDuration(key, full);
-    var octx = new OAC(1, Math.max(1, Math.ceil(44100 * dur)), 44100);
-    schedulePattern(octx, key, full);
-    return octx.startRendering();
-  }
-
-  /* 選択中の音色(full版)を非同期で事前レンダリングしてキャッシュしておく
-     （タイマー終了時のplayAlarmSoundで待ち時間なく即再生できるようにするため） */
-  var alarmRenderCache = { key: null, buffer: null };
-  function prerenderAlarm(key) {
-    if (alarmRenderCache.key === key && alarmRenderCache.buffer) return;
-    renderAlarmBuffer(key, true).then(function (buf) {
-      alarmRenderCache = { key: key, buffer: buf };
-    }).catch(function () { /* OfflineAudioContext非対応：再生時に従来方式へフォールバック */ });
-  }
-  /* 事前レンダリングしたバッファを<audio>要素で再生する */
-  function playBufferOnAudioEl(buffer) {
+  /* 同梱WAVを再生する。stopAfterSec>0 なら途中で止める（設定画面の試聴用）。
+     再生できなかったときだけ、旧方式のオシレーター合成にフォールバックする。 */
+  function playAlarmFile(key, stopAfterSec) {
+    var el = setAlarmSource(key);
+    var full = !stopAfterSec;
+    if (!el) { soundDiag.play = 'NG: <audio>要素が無い'; playViaAudioContextFallback(key, full); return; }
+    var fallback = function (why) {
+      soundDiag.play = 'NG: ' + why;
+      playViaAudioContextFallback(key, full);
+    };
     try {
-      var el = $('#timerAlarmAudio');
-      if (!el) return;
-      if (timer.alarmBlobUrl) { try { URL.revokeObjectURL(timer.alarmBlobUrl); } catch (e) { /* noop */ } }
-      var url = URL.createObjectURL(audioBufferToWavBlob(buffer));
-      timer.alarmBlobUrl = url;
       el.muted = false;
-      el.src = url;
-      el.currentTime = 0;
+      el.loop = false;
+      if (el.currentTime) el.currentTime = 0;
       var p = el.play();
-      if (p && p.catch) p.catch(function () { /* noop */ });
-    } catch (e) { /* noop */ }
+      if (p && p.then) {
+        p.then(function () { soundDiag.play = 'OK (' + alarmFileName(key) + ')'; })
+         .catch(function (err) { fallback((err && err.name) || 'play()拒否'); });
+      } else {
+        soundDiag.play = 'OK (' + alarmFileName(key) + ')';
+      }
+    } catch (e) { fallback('play()例外'); return; }
+    if (stopAfterSec > 0) {
+      clearPreviewStop();
+      timer.previewStop = setTimeout(function () { timer.previewStop = null; stopBeep(); }, stopAfterSec * 1000);
+    }
+  }
+  function clearPreviewStop() {
+    if (timer.previewStop) { clearTimeout(timer.previewStop); timer.previewStop = null; }
   }
   /* 1音分をスケジュール（音色・周波数・長さ・音量を指定） */
   function scheduleTone(ctx, t0, freq, dur, type, peak) {
@@ -3039,7 +3125,7 @@
       for (i = 0; i < beepCount; i++) scheduleTone(ctx, t0 + i * 0.5, (i % 2 === 0) ? 880 : 988, 0.32, 'sine', 0.4);
     }
   }
-  /* Web Audio API(AudioContext)直接再生へのフォールバック（<audio>要素方式が使えない場合のみ） */
+  /* Web Audio API(AudioContext)直接再生へのフォールバック（同梱WAVが再生できない場合のみ） */
   function playViaAudioContextFallback(key, full) {
     try {
       var ctx = timer.audioCtx;
@@ -3048,41 +3134,55 @@
       schedulePattern(ctx, key, full);
     } catch (e) { /* noop */ }
   }
-  /* タイマー終了時のアラーム音（設定でオフなら鳴らさない）。
-     事前レンダリング済みならそれを<audio>要素で即再生、未完了ならその場でレンダリングしてから再生する */
+  /* タイマー終了時のアラーム音（設定でオフなら鳴らさない） */
   function playAlarmSound() {
     if (!timerSettings.soundOn) return;
     stopBeep();
-    if (alarmRenderCache.key === timerSettings.sound && alarmRenderCache.buffer) {
-      playBufferOnAudioEl(alarmRenderCache.buffer);
-      return;
-    }
-    renderAlarmBuffer(timerSettings.sound, true).then(playBufferOnAudioEl)
-      .catch(function () { playViaAudioContextFallback(timerSettings.sound, true); });
+    playAlarmFile(timerSettings.sound, 0);
   }
-  /* 設定画面での試聴（短いプレビュー） */
+  /* 設定画面での試聴（頭の1.6秒だけ鳴らす。鳴る音そのものは終了時とまったく同じファイル） */
   function previewSound(key) {
     unlockAudio();
     stopBeep();
-    renderAlarmBuffer(key, false).then(playBufferOnAudioEl)
-      .catch(function () { playViaAudioContextFallback(key, false); });
+    playAlarmFile(key, 1.6);
   }
   function stopBeep() {
+    clearPreviewStop();
     (timer.beepNodes || []).forEach(function (o) { try { o.stop(); o.disconnect(); } catch (e) { /* noop */ } });
     timer.beepNodes = [];
     try {
       var el = $('#timerAlarmAudio');
-      if (el) { el.pause(); el.currentTime = 0; }
+      if (el) { el.pause(); if (el.currentTime) el.currentTime = 0; }
     } catch (e) { /* noop */ }
   }
-  /* バイブ（対応端末のみ。iPhoneのSafari/PWAは非対応のため無効。設定でオフなら振動しない） */
+  /* バイブ（設定でオフなら振動しない）。
+     navigator.vibrate は iOS の WKWebView に存在せず、これまでiPhoneでは一度も振動していなかった。
+     ネイティブ版は Capacitor の Haptics（CoreHaptics）で鳴らす。
+     Haptics はアプリが前面にあるときだけ効くので、閉じているときの振動は通知側が担当する。 */
+  var VIBRATE_PULSE_MS = 500;   // 1回の振動の長さ
+  var VIBRATE_GAP_MS = 800;     // 次の振動までの間隔
+  var VIBRATE_REPEAT = 7;       // 合計 約5.6秒
   function vibrateAlarm() {
     if (!timerSettings.vibrateOn) return;
+    stopVibrate();
+    var hp = nativePlugin('Haptics');
+    if (isNativeApp() && hp) {
+      var left = VIBRATE_REPEAT;
+      var pulse = function () {
+        if (left-- <= 0) { stopVibrate(); return; }
+        try { hp.vibrate({ duration: VIBRATE_PULSE_MS }).catch(function () { /* noop */ }); } catch (e) { /* noop */ }
+      };
+      pulse();
+      timer.vibrateTimer = setInterval(pulse, VIBRATE_GAP_MS);
+      return;
+    }
+    // Android Chrome など navigator.vibrate があるブラウザ向け（iOS Safariには無い）
     try {
       if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400, 200, 400]);
     } catch (e) { /* noop */ }
   }
   function stopVibrate() {
+    if (timer.vibrateTimer) { clearInterval(timer.vibrateTimer); timer.vibrateTimer = null; }
     try { if (navigator.vibrate) navigator.vibrate(0); } catch (e) { /* noop */ }
   }
 
@@ -3341,6 +3441,25 @@
     $('#toggleSoundOn').checked = timerSettings.soundOn;
     $('#toggleVibrateOn').checked = timerSettings.vibrateOn;
     $('#toggleNotifyOn').checked = timerSettings.notifyOn;
+    $('#toggleIgnoreSilent').checked = timerSettings.ignoreSilent;
+    // 消音モードの制御と診断表示はネイティブ版だけの話なので、ブラウザ版では出さない
+    $('#rowIgnoreSilent').hidden = !isNativeApp();
+    $('#soundDiagSection').hidden = !isNativeApp();
+    renderSoundDiag();
+  }
+  /* 「鳴らない」ときにどこで止まっているかを見せる */
+  function renderSoundDiag() {
+    if (!isNativeApp()) return;
+    $('#diagPlay').textContent = soundDiag.play;
+    $('#diagNotif').textContent = soundDiag.notif;
+    $('#diagSession').textContent = soundDiag.session;
+    var permEl = $('#diagPerm');
+    permEl.textContent = '確認中…';
+    var ln = nativePlugin('LocalNotifications');
+    if (!ln) { permEl.textContent = 'NG: プラグイン未登録'; return; }
+    ln.checkPermissions()
+      .then(function (r) { permEl.textContent = (r && r.display) || '不明'; })
+      .catch(function () { permEl.textContent = 'NG: 確認できず'; });
   }
   var timerSettingsBound = false;
   function bindTimerSettingsOnce() {
@@ -3355,15 +3474,29 @@
       saveTimerSettings();
       renderTimerSettings();
       previewSound(timerSettings.sound);
-      prerenderAlarm(timerSettings.sound);
+      // 試聴の結果（成功/失敗）を診断欄に反映させる
+      setTimeout(renderSoundDiag, 400);
+      // 計測中に音色を変えたら、予約済みの通知も新しい音で取り直す
+      if (timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
     });
     $('#toggleSoundOn').addEventListener('change', function (e) {
       timerSettings.soundOn = e.target.checked;
       saveTimerSettings();
+      if (timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
     });
     $('#toggleVibrateOn').addEventListener('change', function (e) {
       timerSettings.vibrateOn = e.target.checked;
       saveTimerSettings();
+      // ONにしたらその場で1回振動させて、効いていることを確かめられるようにする
+      if (timerSettings.vibrateOn) {
+        var hp = nativePlugin('Haptics');
+        if (isNativeApp() && hp) { try { hp.vibrate({ duration: VIBRATE_PULSE_MS }).catch(function () { /* noop */ }); } catch (e2) { /* noop */ } }
+      }
+    });
+    $('#toggleIgnoreSilent').addEventListener('change', function (e) {
+      timerSettings.ignoreSilent = e.target.checked;
+      saveTimerSettings();
+      applySilentModeSetting().then(renderSoundDiag);
     });
     $('#toggleNotifyOn').addEventListener('change', function (e) {
       timerSettings.notifyOn = e.target.checked;
@@ -3375,6 +3508,7 @@
       } else {
         cancelTimerNotification(); // OFFにした以上、OSに預けた予約も取り消す
       }
+      setTimeout(renderSoundDiag, 400);
     });
   }
 
@@ -3415,6 +3549,11 @@
   // 機種変更・再インストール後の初回起動なら、端末内バックアップから記録を読み戻す
   // （記録が1件でもある端末では何もしない）
   restoreNativeBackupIfEmpty();
+
+  // 消音モードの扱いを設定どおりにしておく（起動直後のタップでも正しい状態で鳴らすため）
+  applySilentModeSetting();
+  // 通知音のコピーは起動を妨げないよう少し遅らせる（初回だけ約1.2MB書き出す）
+  setTimeout(function () { ensureNotificationSounds(); }, 1500);
 
   // 自動バックアップ：起動直後（描画を妨げないよう少し遅らせる）と、
   // アプリを閉じる・他アプリへ切り替えるとき（hidden）に未送信の変更を送る

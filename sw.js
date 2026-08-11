@@ -1,5 +1,5 @@
 /* 筋トレLog Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v43';
+const CACHE = 'kintore-v44';
 const ASSETS = [
   './',
   './index.html',
@@ -9,7 +9,13 @@ const ASSETS = [
   './js/charts.js',
   './manifest.json',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  // タイマーのアラーム音。オフラインでも鳴らせるよう先読みしておく
+  './sounds/beep.wav',
+  './sounds/bell.wav',
+  './sounds/chime.wav',
+  './sounds/digital.wav',
+  './sounds/soft.wav'
 ];
 
 self.addEventListener('install', (e) => {

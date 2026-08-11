@@ -96,7 +96,9 @@ function copyInto(name) {
 
 /* ---- 1. www/ を作り直してソースをコピー ---- */
 resetWww();
-['css', 'js', 'icons', 'manifest.json'].forEach(copyInto);
+// sounds/ はタイマーのアラーム音。アプリ内再生と、Library/Sounds/ へコピーして使う
+// 通知音の両方がこのファイルを参照するため、ネイティブ版にも必ず同梱する
+['css', 'js', 'icons', 'sounds', 'manifest.json'].forEach(copyInto);
 fs.copyFileSync(path.join(ROOT, 'index.html'), path.join(WWW, 'index.html'));
 // sw.js は意図的にコピーしない（Capacitorではオフライン化がネイティブ側の役目のため）
 

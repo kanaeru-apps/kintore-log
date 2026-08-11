@@ -425,7 +425,7 @@ URL入力欄が消えて**「ログイン」1ボタン**になるため、「上
 9. ✅ `npx cap add ios` でiOSプロジェクトを生成し、Info.plist・端末対応・アイコンを調整（7-9）
 10. ✅ アプリ名を決定 → App Store Connect でアプリを作成（`筋トレLog` / Apple ID `1049236802`）
 11. ✅ スクリーンショットを作成（6.9インチ・6.5インチ／7-13）
-12. Codemagicにリポジトリを接続してビルド → TestFlightで実機検証（**特にタイマーの画面ロック中通知**）
+12. ✅ Codemagicにリポジトリを接続してビルド（2026-08-11・Index 4 で成功／7-14） → **TestFlightで実機検証が残**（**特にタイマーの画面ロック中通知**）
 13. App Store Connect でメタデータ入力・App Privacy申告・審査提出
 
 **2026-08-10 時点の検証結果**（実機前に確認できたこと）
@@ -481,7 +481,7 @@ URL入力欄が消えて**「ログイン」1ボタン**になるため、「上
 | `node build-ios.js` を挟む理由 | `www/` は追跡していないため、Codemagic上で生成しないと空になる。ここでクラウド同期のスタブ差し替えと混入チェックも走るので、**同期コードが残っているとこの段階でビルドが止まる** |
 | `submit_to_testflight` | `false`（外部テスト審査への提出。前のビルドが審査中だと毎回失敗するため。内部テストは false でも即使える） |
 
-Codemagic側で必要な準備：リポジトリ接続、`Settings > Integrations` に App Store Connect の API キーを **`Codemagic` という名前で**登録（yaml の `integrations` がこの名前を参照している）。無音カメラで登録済みなら共用できる。
+Codemagic側で必要な準備：リポジトリ接続、`Settings > Integrations` に App Store Connect の API キーを **`Codemagic` という名前で**登録（yaml の `integrations` がこの名前を参照している）。無音カメラで登録済みなら共用できる。**ただしAPIキーの共用だけでは足りず、Bundle IDごとの署名ファイル登録が別途必要**（7-14）。
 
 ### 7-10. 費用
 
@@ -593,6 +593,38 @@ App Store Connect のアプリ作成は完了済み（Apple ID `1049236802`）�
 - 2枚目のタイマーは実行中に設定UIが隠れる仕様なので画面下半分が空く。実際そう見えるのでそのまま
 - 1枚目はドラムのシートが出ると上半分が暗幕（`--overlay`）で暗くなる。iOSのアクションシートと同じ挙動なのでそのまま
 
+### 7-14. Codemagicビルド（2026-08-11 成功）
+
+**結果**：Index 4 / `finished` / 3分11秒 / `App.ipa` 969KB。`Publishing` も完走し App Store Connect へアップロード済み（無音カメラで詰まった422エラーは出なかった）。
+
+**3回失敗した原因：署名ファイルはAppleに作るだけでは足りず、Codemagicに取り込む必要がある**
+
+```
+No matching profiles found for bundle identifier "com.kanaeru.kintore" and distribution type "app_store"
+```
+
+このエラーは**ビルドマシンが起動する前**に出る（ステップ一覧が1つも表示されない）。Codemagicのバックエンドが署名を事前検証している段階で、ビルド時間は消費されない。
+
+原因の切り分けで確認したこと：
+
+| 確認先 | 状態 | 判定 |
+|---|---|---|
+| `codemagic.yaml` | 無音カメラとの差分は名前・Bundle ID・`build-ios.js` の3点のみ | 問題なし |
+| Apple Developer > Profiles | `Kintore Log App Store Profile` / Active / App Store / `com.kanaeru.kintore` | 問題なし |
+| Codemagic > Integrations > Developer Portal | 接続済み（1 key） | 問題なし |
+| **Codemagic > Code signing identities > iOS provisioning profiles** | **`zerocam_app_store_profile`（com.kanaeru.zerocam）のみ** | **これが原因** |
+
+**APIキー（`integrations: app_store_connect: Codemagic`）は登録済みでも、プロファイルは Bundle ID ごとに Codemagic 側へ取り込む必要がある。** yaml が automatic code signing の記法（`distribution_type` + `bundle_identifier`）でも、Codemagicは `Code signing identities` に登録されたものを見ている。
+
+**手順**（新しいアプリを追加するたびに必要）
+
+1. Apple Developer > Profiles でプロファイルを作成（証明書はBundle IDに依存しないので既存を使い回せる）
+2. Codemagic > `Settings`（チーム設定）> `Code signing identities` > `iOS provisioning profiles`
+3. `Fetch profiles` → 該当プロファイルだけチェック → **参照名を入力**（必須。未入力だと "Reference name is required"）→ `Download selected`
+4. 命名は `kintore_app_store_profile`（無音カメラの `zerocam_app_store_profile` に合わせた）
+
+証明書は `zerocam-distribution` として登録済みのものが Apple 上の同一 Distribution 証明書（`84L64LR5AM` / 2027-07-17まで）で、Bundle IDに依存しないため追加不要だった。
+
 ---
 
 - [x] **Phase 8：ライトモード対応（2026-08-10 実装 / v0.12.0）**
@@ -671,6 +703,108 @@ Playwrightで自動確認（全てパス）：
 
 加えて両テーマ×全6タブ＋タイマー実行中を撮影して目視確認した。
 
+---
+
+- [x] **Phase 9：タイマーのアラーム音・バイブレーション修正（2026-08-11 実装 / v0.13.0）**
+
+### 9-1. 症状
+
+TestFlight版の実機で、**タイマー終了時にアラーム音もバイブレーションも鳴らない**。アプリを開いているときも、閉じている（バックグラウンド／画面ロック）ときも鳴らない。消音スイッチはオフ（消音ではない）、通知の許可ダイアログには「許可」を選んでいる。
+
+### 9-2. 原因
+
+| 症状 | 原因 | 根拠 |
+|---|---|---|
+| **閉じている／ロック中に鳴らない** | ローカル通知に `sound` を渡していなかった。Capacitor の実装では `sound` 未指定＝`content.sound` が **nil**＝**確実に無音の通知**になる（既定音にはならない） | `LocalNotificationsPlugin.swift:283-285` |
+| **バイブが鳴らない** | `navigator.vibrate` は **iOS の WKWebView に存在しない**。実装当初から一度も動いていない | Vibration API 非対応 |
+| **開いていても鳴らない** | **未確定**。有力な候補は `OfflineAudioContext` でレンダーした音を `Blob URL` にして `<audio>` に流す経路で、WKWebView では `blob:` の再生が不安定な**可能性がある**。またサイレントスイッチが効く `.ambient` セッションのままだった**可能性もある** | — |
+
+3つ目は再現条件が特定できていない。そのため「原因を1つ直す」のではなく、**不確実な経路を全部やめて、確実に鳴る作りに置き換える**方針にした。
+
+### 9-3. 対策（6点・ユーザー承認済み）
+
+**1. アラーム音を WAV ファイルとして同梱する**
+
+`OfflineAudioContext` → `Blob URL` の経路を全廃し、`<audio src="sounds/beep.wav">` を再生するだけにした。ブラウザが最も確実に鳴らせる形。同時に、**通知音として使うには実ファイルが必須**（`UNNotificationSound` はファイル名しか受け取れない）という要件も同時に満たせる。
+
+- 音源は `tools/gen_alarm_wav.py` が生成する（22050Hz / 16bit / モノラル）
+- **これは `js/app.js` の `schedulePattern()` full 版を Python でオフライン再現したもの**。音を変えたいときは JS ではなく **このスクリプトを直して `python tools/gen_alarm_wav.py` を叩き直す**
+- 削除した関数：`audioBufferToWavBlob` / `patternDuration` / `renderAlarmBuffer` / `prerenderAlarm` / `alarmRenderCache` / `playBufferOnAudioEl`
+- Web Audio 互換の落とし穴：`OscillatorNode` は波形の**振幅が ±1** になるように出る。倍音の合計で割ると矩形波（digital）だけ極端に小さくなるため、`wave_peak()` で**実際の波形のピーク**を求めて割っている
+
+| ファイル | 長さ | ピーク | 鳴る回数 |
+|---|---|---|---|
+| `beep.wav` | 5.50秒 | 0.40 | 11 |
+| `bell.wav` | 6.00秒 | 0.41 | 4 |
+| `chime.wav` | 6.00秒 | 0.35 | 9（3回×3音） |
+| `digital.wav` | 5.00秒 | 0.22 | 22 |
+| `soft.wav` | 5.50秒 | 0.22 | 6 |
+
+**2. ローカル通知に `sound` を指定する（閉じているときの本命）**
+
+```js
+if (timerSettings.soundOn) notif.sound = alarmFileName(timerSettings.sound);
+```
+
+ただし **通知音のファイルは Capacitor の web 資産の場所からは読めない**。iOS が探すのは **main bundle 直下** か **`Library/Sounds/`** だけで、web 資産は bundle の `public/` 配下に入るため対象外。そこで起動後に `@capacitor/filesystem` で `Library/Sounds/` へコピーする（`ensureNotificationSounds()` → `copySoundToLibrary()`）。コピー済みかは `localStorage['kintore_notif_sound_ver']` と `ALARM_ASSET_VERSION` の比較で判定する。
+
+> **音源を差し替えたら `ALARM_ASSET_VERSION` を上げること。** 上げないと端末に残った古いWAVが使われ続ける。
+
+予約は `Promise.all([ensureNotifPermission(), ensureNotificationSounds()])` の**両方を待ってから**行う。コピー前に予約すると、その回だけファイルが見つからない通知になる。
+
+**3. AVAudioSession を `.playback` にする（開いているときの保険）**
+
+WKWebView の音は既定でサイレントスイッチに従う。`AppDelegate.swift` の起動時と `applicationDidBecomeActive`（電話の着信などで非アクティブにされた後の張り直し）で `.playback` + `.mixWithOthers` を張る。`.mixWithOthers` を付けているので、**Audibleや音楽を止めずに上から重ねて鳴る**（トレーニング中に音楽を止められると困るため）。
+
+**4. バイブを `@capacitor/haptics` に置き換える**
+
+`navigator.vibrate` はネイティブ版では使わない。`Haptics.vibrate({duration:500})` を `setInterval` で 800ms ごと × 7回 ≒ **約5.6秒**繰り返す（アラーム音の長さに合わせた）。ただし **Haptics はアプリが前面にあるときだけ有効**。閉じているときの振動は通知側（iOSの設定）に従う。PWA版は従来どおり `navigator.vibrate`（Androidでは動く）。
+
+**5. 設定に「音の状態」診断を出す**
+
+実機で鳴らなかったときに切り分けられるよう、設定 > タイマー設定に `#soundDiagSection` を追加した（ネイティブ版でのみ表示）。`再生` / `通知音` / `オーディオ` / `通知許可` の4項目に結果を出す。
+
+**6. 「消音モードでも鳴らす」トグル**
+
+既定 **ON**（=`.playback`）。OFFにすると `.ambient` になり消音スイッチに従う。JS から `AlarmAudio.setIgnoreSilentMode({value})` を呼ぶ。**起動直後は WebView がまだ動いていないので JS から受け取れない**ため、`UserDefaults`（キー `kintore_ignore_silent`）に写して AppDelegate がそれを読む。
+
+### 9-4. 自前プラグインの登録方法（重要）
+
+`AlarmAudioPlugin` はアプリターゲット側にあるため、**`capacitor.config.json` の `packageClassList` には載せられない**（あのファイルは `cap sync` が毎回作り直す）。そのため手動登録している：
+
+```
+Main.storyboard の customClass = MainViewController（customModule="App"）
+        ↓
+MainViewController: CAPBridgeViewController
+        ↓ capacitorDidLoad() をオーバーライド（bridge生成直後・WebView読込前に呼ばれる）
+bridge?.registerPluginInstance(AlarmAudioPlugin())
+```
+
+**この3つは連動している。** Storyboard の `customClass` を戻すとプラグインが消えて `AlarmAudio` の呼び出しが無言で失敗する（JS側は `nativePlugin()` が undefined を返して素通りするだけなので、エラーも出ない）。
+
+`AlarmAudioPlugin` は `CAPBridgedPlugin` プロトコル（`identifier` / `jsName` / `pluginMethods` の3プロパティ）を満たす必要がある。
+
+### 9-5. 検証
+
+| 項目 | 結果 |
+|---|---|
+| `node --check` （app.js / sw.js / build-ios.js） | ✅ |
+| 削除した関数への残存参照 | ✅ ゼロ |
+| 生成WAVの長さ・ピーク・鳴る回数が設計値と一致 | ✅ 5音すべて（上表） |
+| `node build-ios.js` で `www/sounds/` に5本コピー | ✅ |
+| `npx cap sync ios` でプラグイン3つ検出（filesystem / haptics / local-notifications） | ✅ |
+| `ios/App/App/public/sounds/` に5本同梱 | ✅ |
+| Playwright：音色タップで `currentSrc` が `sounds/bell.wav`・`duration=6`・`el.error` なし | ✅ |
+| Playwright：`sounds/bell.wav` が HTTP 206・失敗リクエストなし・JSエラーなし | ✅ |
+| Playwright：タイマー終了で「TIME UP」まで到達 | ✅ |
+
+**未検証（実機でしか確認できない）**：実際に音が出るか、閉じているときに通知音が鳴るか、Haptics が振動するか。→ TestFlight で確認する。
+
+### 9-6. 実装中に自分で見つけて直した点
+
+- **解錠再生と試聴再生の競合**：初回タップ時、無音WAVでの解錠 `play()` が非同期に解決した後の後始末が `el.pause()` を呼ぶため、その間に始まった試聴が一瞬で止まる。→ 後始末の冒頭で `if (el.getAttribute('data-sound')) return;` として、本命の再生が始まっていたら触らないようにした
+- **「コピー未完了なら `sound` を指定しない」は誤り**：無指定は既定音ではなく**確実な無音**。ファイル名を渡しておけば、万一見つからなくても iOS が既定音を鳴らすと考えられるため、無指定より安全
+
 ## ファイル構成
 
 ```
@@ -683,6 +817,9 @@ Playwrightで自動確認（全てパス）：
 │   ├── app.js         ← 画面制御・レンダリング・イベント
 │   └── charts.js      ← グラフ・レポート（種目別グラフ・部位別ボリューム、自作SVG）
 ├── icons/             ← PWAアイコン（192/512/apple-touch-icon）＋ App Store用 icon-1024.png
+├── sounds/            ← タイマーのアラーム音WAV5種（アプリ内再生と通知音の両方で使う。tools/gen_alarm_wav.py の生成物）
+├── tools/
+│   └── gen_alarm_wav.py ← sounds/*.wav を生成する。音を変えるときはJSではなくこれを直す（Phase 9-3）
 ├── manifest.json      ← ホーム画面追加用
 ├── sw.js              ← オフラインキャッシュ（HTTPS公開後に有効）
 ├── gas/code.gs        ← スプレッドシート同期用GAS Web Appテンプレ（ユーザー自身のスプレッドシートにコピペして使う。PWA本体からは読み込まれない）
@@ -699,6 +836,8 @@ Playwrightで自動確認（全てパス）：
 └── ios/                ← Xcodeプロジェクト（cap add ios で生成、コミット対象）
     └── App/App/
         ├── Info.plist              ← 表示名・縦向き固定・輸出コンプライアンス
+        ├── AppDelegate.swift       ← AVAudioSession設定＋AlarmAudioプラグイン＋MainViewController（Phase 9-4）
+        ├── Base.lproj/Main.storyboard ← customClass=MainViewController（戻すとプラグインが消える）
         └── Assets.xcassets/        ← AppIcon（1024）・Splash（2732）
 ```
 
@@ -754,6 +893,9 @@ Playwrightで自動確認（全てパス）：
 - CSV仕様：`日付,曜日,部位,種目,セット,重量kg,回数,ボリュームkg,コンディション,メモ`（BOM付きUTF-8・CRLF）
 - Service Worker登録は `location.protocol` がhttpの時のみ（file://でのローカル確認時はスキップ）
 - ローカル確認方法：`index.html` をダブルクリックしてブラウザで開く（データはそのブラウザ内に保存される）
+- **アラーム音を変えるときは `tools/gen_alarm_wav.py` を直して叩き直し、`ALARM_ASSET_VERSION` も上げる**（上げないと端末の `Library/Sounds/` に残った古いWAVが通知音として使われ続ける。Phase 9-3）
+- **`sw.js` の `CACHE` は必ず上げる**（現行 `kintore-v44`）。上げないと古い資産が配られる
+- **`navigator.vibrate` は iOS では存在しない**。ネイティブ版の振動は `@capacitor/haptics`（前面時のみ）、閉じているときは通知側に従う（Phase 9-3）
 
 ## 次のアクション
 
@@ -762,11 +904,18 @@ Playwrightで自動確認（全てパス）：
 2. **Phase 7：App Store公開** → **コード側は完了（2026-08-10）。上記「Phase 7」を参照**
    - 方針確定：**v1.0＝クラウド同期なし**（iCloudバックアップ＋ローカル通知）で確実に審査を通す → **v1.1＝Googleログイン同期**を追加。PWA版は自分専用として現状維持
    - 完了：実装・自動検証・プライバシー/サポートページ・`codemagic.yaml`・Xcodeプロジェクト・アイコン（7-8の1〜9）
-   - **次にやること（ユーザー作業が必要）**
-     1. **アプリ名を決める** → App Store Connect で新規アプリを作成（Bundle ID `com.kanaeru.kintore` を登録）
-     2. Codemagic にこのリポジトリを接続し、`ios-workflow` を実行 → TestFlight へ
-     3. 実機で **画面ロック中のタイマー通知**と、機種変更時の復元を確認
-     4. スクリーンショット4枚（記録／履歴／グラフ／タイマー）を作成して審査提出
+   - 完了：アプリ名決定＋App Store Connectでアプリ作成（`筋トレLog` / Apple ID `1049236802`）、スクリーンショット6枚×2サイズ（7-13）、**Codemagicビルド成功＋App Store Connectへアップロード**（2026-08-11 / Index 4 / 7-14）
+   - 完了：TestFlight配信（内部テスト「社内テスト」にテスター招待済み。1.0(4)/1.0(5) が配信可能）
+   - **次にやること**
+     1. **Codemagicで v0.13.0（Phase 9の音・バイブ修正）を再ビルド → TestFlightで実機検証**
+        - アプリを**開いている**ときにアラーム音が鳴るか（5音とも）
+        - アプリを**閉じている／画面ロック中**にアラーム音が鳴るか ← このアプリ最大の売り。4.2対策の柱
+        - **バイブレーション**が振動するか（前面時）
+        - 鳴らなければ **設定 > タイマー設定 > 音の状態** の4項目（再生/通知音/オーディオ/通知許可）を見て切り分ける
+        - 「消音モードでも鳴らす」をOFFにすると消音スイッチに従うこと
+     2. 同上 — ライトモードで**ステータスバーの時刻・電池が読めるか**（8-6の唯一の未確定項目）
+     3. 同上 — 機種変更時の復元（`Documents/`からの自動復元。シミュレータでは確認済み）
+     4. App Store Connect でメタデータ入力（文言は7-12に確定済み）・スクショアップロード・App Privacy申告・審査提出
 3. **Phase 8：ライトモード** → 実装・自動検証は完了（2026-08-10 / v0.12.0）。**実機で確認すること**
    - iPhoneでライトにしたとき、**ステータスバーの時刻・電池が読めるか**（8-6の未確定事項。読めなければ対処が要る）
    - ホーム画面のPWAを開き直して設定画面下部が **v0.12.0** になっていること

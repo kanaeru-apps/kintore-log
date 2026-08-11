@@ -663,6 +663,13 @@ button { cursor: pointer; }
 
 /* ---------------- 設定 ---------------- */
 .s-section { margin: 22px 0; }
+/* セクション下の補足文（「音の状態」の使い方など） */
+.s-note {
+  margin: 8px 2px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dim);
+}
 .s-title {
   font-size: 12px;
   letter-spacing: 0.14em;

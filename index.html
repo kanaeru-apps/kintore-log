@@ -17,7 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.12.0">
+<link rel="stylesheet" href="css/style.css?v=0.13.0">
 <!-- テーマの初期設定。CSSより先に <html data-theme> を決めておかないと、起動の一瞬だけ
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
@@ -288,7 +288,7 @@
 
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレLog v0.12.1 — Phase 8</p>
+      <p class="version">筋トレLog v0.13.0 — Phase 8</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -312,14 +312,31 @@
             <label class="toggle"><input type="checkbox" id="toggleSoundOn"><span class="toggle-track"></span></label>
           </div>
           <div class="s-row">
-            <div class="s-main"><b>バイブレーションをする</b><small>対応端末のみ（iPhoneは非対応）</small></div>
+            <div class="s-main"><b>バイブレーションをする</b><small>アプリを開いているとき。閉じているときは通知の設定に従います</small></div>
             <label class="toggle"><input type="checkbox" id="toggleVibrateOn"><span class="toggle-track"></span></label>
           </div>
+          <div class="s-row" id="rowIgnoreSilent" hidden>
+            <div class="s-main"><b>消音モードでも鳴らす</b><small>本体横のスイッチが消音でもアラームを鳴らします</small></div>
+            <label class="toggle"><input type="checkbox" id="toggleIgnoreSilent"><span class="toggle-track"></span></label>
+          </div>
           <div class="s-row">
-            <div class="s-main"><b>システム通知をする</b></div>
+            <div class="s-main"><b>システム通知をする</b><small>アプリを閉じていても知らせます</small></div>
             <label class="toggle"><input type="checkbox" id="toggleNotifyOn"><span class="toggle-track"></span></label>
           </div>
         </div>
+      </div>
+
+      <!-- 「鳴らない」ときにどこで止まっているかを見るための表示。
+           ネイティブ版でのみ出す（ブラウザ版は該当する仕組みが無いため） -->
+      <div class="s-section" id="soundDiagSection" hidden>
+        <h4 class="s-title">音の状態</h4>
+        <div class="panel-list">
+          <div class="s-row"><div class="s-main"><b>アラーム音の再生</b><small id="diagPlay">—</small></div></div>
+          <div class="s-row"><div class="s-main"><b>通知音のファイル</b><small id="diagNotif">—</small></div></div>
+          <div class="s-row"><div class="s-main"><b>消音モードの扱い</b><small id="diagSession">—</small></div></div>
+          <div class="s-row"><div class="s-main"><b>通知の許可</b><small id="diagPerm">—</small></div></div>
+        </div>
+        <p class="s-note">音が鳴らないときは、この画面のアラーム音を1つタップして試聴してみてください。ここで鳴るのに終了時に鳴らない場合と、ここでも鳴らない場合とで原因が違います。</p>
       </div>
     </section>
 
@@ -537,9 +554,9 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.12.0"></script>
-<script src="js/app.js?v=0.12.0"></script>
-<script src="js/charts.js?v=0.12.0"></script>
+<script src="js/db.js?v=0.13.0"></script>
+<script src="js/app.js?v=0.13.0"></script>
+<script src="js/charts.js?v=0.13.0"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});
