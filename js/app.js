@@ -2278,7 +2278,7 @@
      Capacitorのweb資産は bundle の public/ 配下に入るので通知からは参照できない。
      そこで初回起動時に sounds/*.wav を Library/Sounds/ へコピーしておく。
      音源を作り直したら ALARM_ASSET_VERSION を上げてコピーし直させること。 */
-  var ALARM_ASSET_VERSION = '1';
+  var ALARM_ASSET_VERSION = '2';
   var ALARM_ASSET_KEY = 'kintore_notif_sound_ver';
   var notifSoundsReady = false;
   var notifSoundsPromise = null;
@@ -2290,16 +2290,91 @@
     return notifSoundsPromise;
   }
 
+  /* Library/Sounds に実際に何があるかをネイティブ側に聞く。
+     localStorage の「コピー済み」フラグは“やったつもり”しか表さないので、
+     本当にファイルがあるかはこちらで確かめる。 */
+  function soundKeys() { return SOUND_PATTERNS.map(function (p) { return p.key; }); }
+
+  function readSoundFiles() {
+    var alarm = nativePlugin('AlarmAudio');
+    if (!isNativeApp() || !alarm) return Promise.resolve(null);
+    return alarm.soundFiles({ names: soundKeys() })
+      .then(function (r) { return r || null; })
+      .catch(function () { return null; });
+  }
+
+  /* 通知音がどこに在るかを1行にまとめる。
+     アプリ本体に同梱されていれば、Library/Sounds が空でも通知音は鳴る。 */
+  function describeSoundFiles(r) {
+    var bundled = (r && r.bundled) || [];
+    var files = (r && r.files) || [];
+    if (!r) return '確認できず';
+    var head = bundled.length ? 'アプリ本体に' + bundled.length + '本' : 'アプリ本体になし';
+    var tail = files.length ? 'Library: ' + files.join(' / ') : 'Library: 0件';
+    if (!bundled.length && !files.length) return '0件（通知音のファイルが無い＝無音になる）';
+    return head + ' ／ ' + tail;
+  }
+
+  function installedAssetVersion() {
+    try { return localStorage.getItem(ALARM_ASSET_KEY); } catch (e) { return null; }
+  }
+
   function installNotificationSounds() {
+    if (!isNativeApp()) { soundDiag.notif = '—（ブラウザ版）'; return Promise.resolve(false); }
+    return readSoundFiles().then(function (r) {
+      var files = (r && r.files) || [];
+      var bundled = (r && r.bundled) || [];
+      soundDiag.files = describeSoundFiles(r);
+
+      // アプリ本体に同梱されていれば、UNNotificationSound はそのまま見つけられる。
+      // コピーという失敗しうる手順を踏まずに済むので、これを本命にする
+      if (bundled.length >= SOUND_PATTERNS.length) {
+        notifSoundsReady = true;
+        soundDiag.notif = 'OK (アプリ本体に同梱)';
+        return true;
+      }
+      // 同梱が無い古いビルド向け。中身もあり音源の版も一致しているなら再コピーは不要。
+      // 版を見ないと、音源を差し替えても古いファイルが残り続けて直らない
+      var haveAll = installedAssetVersion() === ALARM_ASSET_VERSION && SOUND_PATTERNS.every(function (p) {
+        return files.some(function (f) { return f.indexOf(alarmFileName(p.key) + ' ') === 0 && f.indexOf(' 0B') < 0; });
+      });
+      if (haveAll) {
+        notifSoundsReady = true;
+        soundDiag.notif = 'OK (' + files.length + '本コピー済み)';
+        return true;
+      }
+      return copyViaNative().then(function (ok) { return ok ? true : copyViaFilesystem(); });
+    });
+  }
+
+  /* 本命の経路：同梱WAVを bundle から Library/Sounds へネイティブがコピーする。
+     JS の fetch → base64 → Filesystem という長い経路は失敗箇所が多く、
+     どこでこけても「通知は出るが無音」という同じ症状になって切り分けられなかった。 */
+  function copyViaNative() {
+    var alarm = nativePlugin('AlarmAudio');
+    if (!alarm) { soundDiag.notif = 'NG: AlarmAudio未登録'; return Promise.resolve(false); }
+    var names = SOUND_PATTERNS.map(function (p) { return p.key; });
+    return alarm.installSounds({ names: names })
+      .then(function (r) {
+        if (r && r.ok) {
+          notifSoundsReady = true;
+          try { localStorage.setItem(ALARM_ASSET_KEY, ALARM_ASSET_VERSION); } catch (e) { /* noop */ }
+          soundDiag.notif = 'OK (ネイティブでコピー)';
+          return readSoundFiles().then(function (f) {
+            soundDiag.files = describeSoundFiles(f);
+            return true;
+          });
+        }
+        soundDiag.notif = 'NG: ' + ((r && (r.reason || (r.failed || []).join(','))) || '理由不明');
+        return false;
+      })
+      .catch(function (e) { soundDiag.notif = 'NG: ' + errText(e); return false; });
+  }
+
+  /* 予備の経路：ネイティブ側が古いビルドで installSounds を持っていない場合に使う */
+  function copyViaFilesystem() {
     var fsPlugin = nativePlugin('Filesystem');
-    if (!isNativeApp() || !fsPlugin) { soundDiag.notif = '—（ブラウザ版）'; return Promise.resolve(false); }
-    var done = '';
-    try { done = localStorage.getItem(ALARM_ASSET_KEY) || ''; } catch (e) { /* noop */ }
-    if (done === ALARM_ASSET_VERSION) {
-      notifSoundsReady = true;
-      soundDiag.notif = 'OK (コピー済み)';
-      return Promise.resolve(true);
-    }
+    if (!fsPlugin) { soundDiag.notif = 'NG: Filesystem未登録'; return Promise.resolve(false); }
     // 5本まとめてbase64にするとメモリを食うので1本ずつ順番に書く
     var chain = Promise.resolve();
     SOUND_PATTERNS.forEach(function (p) {
@@ -2308,11 +2383,13 @@
     return chain.then(function () {
       notifSoundsReady = true;
       try { localStorage.setItem(ALARM_ASSET_KEY, ALARM_ASSET_VERSION); } catch (e) { /* noop */ }
-      soundDiag.notif = 'OK (今回コピー)';
-      return true;
-    }).catch(function () {
-      // 失敗しても通知そのものは出る（音がOS既定になるだけ）。次の起動で再試行される
-      soundDiag.notif = 'NG: コピー失敗';
+      soundDiag.notif = 'OK (Filesystemでコピー)';
+      return readSoundFiles().then(function (f) {
+        soundDiag.files = describeSoundFiles(f);
+        return true;
+      });
+    }).catch(function (e) {
+      soundDiag.notif = 'NG: コピー失敗 ' + errText(e);
       return false;
     });
   }
@@ -2353,6 +2430,21 @@
   function hhmmss(d) {
     function p(n) { return ('0' + n).slice(-2); }
     return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+
+  /* iOS側の通知設定を読む。
+     通知を「許可」していても、iPhoneの設定でサウンドだけオフにされていると
+     バナーは出るのに無音になる。checkPermissions() では区別できないため自前で見る。 */
+  function refreshIosNotifDiag() {
+    var alarm = nativePlugin('AlarmAudio');
+    if (!isNativeApp() || !alarm) { soundDiag.ios = '—（ブラウザ版）'; return Promise.resolve(); }
+    return alarm.notificationSettings()
+      .then(function (r) {
+        if (!r) { soundDiag.ios = '取得できず'; return; }
+        soundDiag.ios = '音' + r.sound + ' / バナー' + r.alert + ' / ロック画面' + r.lockScreen +
+          ' / 表示' + r.alertStyle + '（' + r.status + '）';
+      })
+      .catch(function (e) { soundDiag.ios = 'NG: ' + errText(e); });
   }
 
   /* OSが実際に予約を受け取ったかを確認する。
@@ -3065,7 +3157,11 @@
   /* 「音が鳴らない」と言われたときに設定画面で状態を見せるための記録（診断表示用）。
      sched / pending は「アプリを閉じているときの通知」が出なかったときに、
      予約そのものが失敗したのか・OSまで届いているのかを切り分けるためのもの。 */
-  var soundDiag = { play: '未実行', notif: '未実行', session: '未実行', sched: '未実行', pending: '未確認' };
+  var soundDiag = {
+    play: '未実行', notif: '未実行', session: '未実行',
+    sched: '未実行', pending: '未確認',
+    files: '未確認', ios: '未確認'
+  };
   var SILENT_WAV_URL = (function () {
     // 1chモノラル・8kHz・16bit・約0.05秒(400サンプル)の無音WAV。ArrayBufferは既定でゼロ埋めなのでそのまま無音になる
     var sampleRate = 8000, samples = 400, dataSize = samples * 2;
@@ -3531,15 +3627,25 @@
     $('#diagSession').textContent = soundDiag.session;
     $('#diagSched').textContent = soundDiag.sched;
     $('#diagPending').textContent = soundDiag.pending;
+    $('#diagFiles').textContent = soundDiag.files;
+    $('#diagIos').textContent = soundDiag.ios;
     var permEl = $('#diagPerm');
     permEl.textContent = '確認中…';
     var ln = nativePlugin('LocalNotifications');
-    if (!ln) { permEl.textContent = 'NG: プラグイン未登録'; return; }
-    ln.checkPermissions()
-      .then(function (r) { permEl.textContent = (r && r.display) || '不明'; })
-      .catch(function () { permEl.textContent = 'NG: 確認できず'; });
-    // 予約状況はOSに聞かないと分からないので、画面を開くたびに取り直す
+    if (ln) {
+      ln.checkPermissions()
+        .then(function (r) { permEl.textContent = (r && r.display) || '不明'; })
+        .catch(function () { permEl.textContent = 'NG: 確認できず'; });
+    } else {
+      permEl.textContent = 'NG: プラグイン未登録';
+    }
+    // OSに聞かないと分からないものは、画面を開くたびに取り直す
     refreshPendingDiag().then(function () { $('#diagPending').textContent = soundDiag.pending; });
+    refreshIosNotifDiag().then(function () { $('#diagIos').textContent = soundDiag.ios; });
+    readSoundFiles().then(function (r) {
+      soundDiag.files = describeSoundFiles(r);
+      $('#diagFiles').textContent = soundDiag.files;
+    });
   }
   var timerSettingsBound = false;
   function bindTimerSettingsOnce() {

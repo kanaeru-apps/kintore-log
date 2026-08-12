@@ -1,5 +1,6 @@
 import UIKit
 import AVFoundation
+import UserNotifications
 import Capacitor
 
 @UIApplicationMain
@@ -94,7 +95,10 @@ public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "AlarmAudioPlugin"
     public let jsName = "AlarmAudio"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "setIgnoreSilentMode", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "setIgnoreSilentMode", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "installSounds", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "soundFiles", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "notificationSettings", returnType: CAPPluginReturnPromise)
     ]
 
     @objc public func setIgnoreSilentMode(_ call: CAPPluginCall) {
@@ -102,6 +106,131 @@ public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         UserDefaults.standard.set(value, forKey: AlarmAudioSession.preferenceKey)
         let category = AlarmAudioSession.apply(ignoreSilentMode: value)
         call.resolve(["category": category])
+    }
+
+    /// 通知音の置き場所（Library/Sounds）。iOS の UNNotificationSound が探すのはここか
+    /// bundle 直下だけで、Capacitor の web 資産（bundle の public/ 配下）は対象外。
+    private func soundsDirectory() -> URL? {
+        guard let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else { return nil }
+        return lib.appendingPathComponent("Sounds")
+    }
+
+    /// 同梱WAVの在りか。
+    /// Xcode の Resources に個別ファイルとして入れてあるので通常は bundle 直下に居る
+    /// （＝コピーしなくても通知音として参照できる）。web資産としての public/sounds は予備。
+    private func bundledSound(_ name: String) -> URL? {
+        return Bundle.main.url(forResource: name, withExtension: "wav")
+            ?? Bundle.main.url(forResource: name, withExtension: "wav", subdirectory: "public/sounds")
+    }
+
+    /// 同梱の WAV を Library/Sounds/ へコピーする。
+    ///
+    /// JS 側は fetch → base64 → Filesystem プラグインという長い経路でこれをやっていたが、
+    /// 途中のどこで失敗しても「通知は出るが無音」という同じ症状になり切り分けられない。
+    /// bundle からの単純なコピーで済む処理なので、ネイティブ側で完結させる。
+    @objc public func installSounds(_ call: CAPPluginCall) {
+        let names = call.getArray("names", String.self) ?? []
+        let fm = FileManager.default
+        guard let dir = soundsDirectory() else {
+            call.resolve(["ok": false, "reason": "Libraryディレクトリが見つからない"])
+            return
+        }
+        do {
+            if !fm.fileExists(atPath: dir.path) {
+                try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            }
+        } catch {
+            call.resolve(["ok": false, "reason": "Soundsフォルダを作れない"])
+            return
+        }
+        var copied: [String] = []
+        var failed: [String] = []
+        for name in names {
+            guard let src = bundledSound(name) else {
+                failed.append("\(name):同梱されていない")
+                continue
+            }
+            do {
+                // removeItem は使わず上書きする（既存ファイルを消す必要がない）
+                let data = try Data(contentsOf: src)
+                try data.write(to: dir.appendingPathComponent("\(name).wav"), options: .atomic)
+                copied.append(name)
+            } catch {
+                failed.append("\(name):書き込み失敗")
+            }
+        }
+        call.resolve(["ok": failed.isEmpty, "dir": dir.path, "copied": copied, "failed": failed])
+    }
+
+    /// 通知音が実際にどこに在るかを返す。
+    /// 「コピーしたつもり」と「本当にある」を分けて見るための確認用で、
+    /// bundle 直下（本命）と Library/Sounds（予備）の両方を報告する。
+    @objc public func soundFiles(_ call: CAPPluginCall) {
+        let fm = FileManager.default
+        let names = call.getArray("names", String.self) ?? []
+        // UNNotificationSound が見に行くのは bundle 直下だけなので、
+        // public/sounds にしか無いものは「同梱あり」に数えない
+        let bundled = names.filter { Bundle.main.url(forResource: $0, withExtension: "wav") != nil }
+
+        guard let dir = soundsDirectory() else {
+            // 空配列はリテラルのままだと型が決まらないので、明示して渡す
+            call.resolve(["dir": "", "files": [String](), "exists": false, "bundled": bundled])
+            return
+        }
+        var files: [String] = []
+        if let entries = try? fm.contentsOfDirectory(atPath: dir.path) {
+            for name in entries.sorted() {
+                let path = dir.appendingPathComponent(name).path
+                let size = (try? fm.attributesOfItem(atPath: path)[.size]) as? Int ?? -1
+                files.append("\(name) \(size)B")
+            }
+        }
+        call.resolve([
+            "dir": dir.path,
+            "files": files,
+            "exists": fm.fileExists(atPath: dir.path),
+            "bundled": bundled
+        ])
+    }
+
+    /// iOS 側の通知設定を返す。
+    /// 通知を「許可」していても、サウンドだけ個別にオフにされていると無音になる。
+    /// Capacitor の checkPermissions() は authorizationStatus しか返さないため自前で見る。
+    @objc public func notificationSettings(_ call: CAPPluginCall) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            func label(_ value: UNNotificationSetting) -> String {
+                switch value {
+                case .enabled: return "オン"
+                case .disabled: return "オフ"
+                default: return "非対応"
+                }
+            }
+            var status = "不明"
+            switch settings.authorizationStatus {
+            case .notDetermined: status = "未確認"
+            case .denied: status = "拒否"
+            case .authorized: status = "許可"
+            case .provisional: status = "仮承認(静かに配信)"
+            case .ephemeral: status = "一時的"
+            @unknown default: status = "不明"
+            }
+            var style = "不明"
+            switch settings.alertStyle {
+            // .none は Optional.none と紛らわしいので型を明示する
+            case UNAlertStyle.none: style = "なし"
+            case .banner: style = "バナー"
+            case .alert: style = "通知"
+            @unknown default: style = "不明"
+            }
+            call.resolve([
+                "status": status,
+                "sound": label(settings.soundSetting),
+                "alert": label(settings.alertSetting),
+                "lockScreen": label(settings.lockScreenSetting),
+                "notificationCenter": label(settings.notificationCenterSetting),
+                "alertStyle": style
+            ])
+        }
     }
 }
 
