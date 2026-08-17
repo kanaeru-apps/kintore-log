@@ -1,5 +1,6 @@
 import UIKit
 import AVFoundation
+import AudioToolbox
 import UserNotifications
 import Capacitor
 
@@ -98,8 +99,23 @@ public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "setIgnoreSilentMode", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "installSounds", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "soundFiles", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "notificationSettings", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "notificationSettings", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "vibrate", returnType: CAPPluginReturnPromise)
     ]
+
+    /// 端末を振動させる。
+    ///
+    /// Capacitor の Haptics は CoreHaptics のエンジンを呼び出しごとに作る作りで、
+    /// エンジンがローカル変数のまま関数を抜けるため、振動が途中で切れることがある。
+    /// こちらは昔からある AudioServices の振動で、消音モードでも鳴り、
+    /// 1回あたり約0.4秒と長さは固定だが確実に動く。
+    /// 繰り返しは JS 側が間隔をあけて何度も呼ぶことで作る。
+    @objc public func vibrate(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+            call.resolve()
+        }
+    }
 
     @objc public func setIgnoreSilentMode(_ call: CAPPluginCall) {
         let value = call.getBool("value", true)

@@ -2475,10 +2475,9 @@
   var TIMER_NOTIF_ID = 1;
   var TEST_NOTIF_ID = 2;
   var notifPermissionAsked = false;
-  /* 許可のダイアログはユーザーが答えるまで返らないので長め、
-     音の準備は裏方なので短めで見切る */
+  /* 許可のダイアログはユーザーが答えるまで返らないので長めに待つ。
+     ただし待つのは「予約を出したあと」なので、待っている間に何が起きても予約は残る */
   var PERM_WAIT_MS = 20000;
-  var SOUND_WAIT_MS = 2000;
 
   function errText(e) {
     if (!e) return '理由不明';
@@ -2577,85 +2576,112 @@
     return notif;
   }
 
-  /* 予約の結果は必ず soundDiag.sched に残す。
-     ここを無言のreturnと空catchで捨てていたため、実機で「通知が出ない」と言われても
-     予約に失敗しているのか許可が下りていないのかを切り分けられなかった。 */
-  function scheduleTimerNotification(endAtMs) {
-    var ln = nativePlugin('LocalNotifications');
-    if (!isNativeApp()) { soundDiag.sched = '—（ブラウザ版）'; return; }
-    if (!ln) { soundDiag.sched = 'NG: 通知プラグインが読み込まれていない'; return; }
-    if (!timerSettings.notifyOn) { soundDiag.sched = '—（システム通知がOFF）'; return; }
-    cancelTimerNotification();
-    soundDiag.sched = '予約中…';
-    // 予約に至るまでのどこで同期例外が出ても、必ず診断に残す
-    try { scheduleTimerNotificationInner(ln, endAtMs); }
-    catch (e) { soundDiag.sched = 'NG: ' + errText(e); noteAppError('通知の予約', e); }
-  }
-
-  function scheduleTimerNotificationInner(ln, endAtMs) {
-    Promise.all([
-      // 許可の確認はユーザーがダイアログに答えるのを待つことがあるので長めに取る
-      withTimeout(ensureNotifPermission(), PERM_WAIT_MS, null),
-      // 音の準備は「間に合えば待つ」だけ。返ってこなくても予約は必ず出す。
-      // 音が付かない通知は、通知が出ないことより明らかにましなので待ち続けてはいけない
-      withTimeout(ensureNotificationSounds(), SOUND_WAIT_MS, false)
-    ]).then(function (r) {
-      var granted = r[0];
-      if (granted === false) { soundDiag.sched = 'NG: 通知が許可されていない'; return; }
-      if (endAtMs <= Date.now()) { soundDiag.sched = 'NG: 終了時刻が過去'; return; }
-      var at = new Date(endAtMs);
-      var notif = buildNotif(TIMER_NOTIF_ID, '休憩終了！ 次のセットへ', at);
-      return ln.schedule({ notifications: [notif] })
+  /* 実際にOSへ予約を投げる。ここは何も待たずに呼べること自体が要件なので、
+     同期例外も含めて必ず soundDiag.sched に残し、外へは投げない。 */
+  function pushNotif(ln, id, body, atMs) {
+    var at = new Date(atMs);
+    var notif = buildNotif(id, body, at);
+    soundDiag.sched = '予約中… ' + hhmmss(at);
+    try {
+      Promise.resolve()
+        .then(function () { return ln.schedule({ notifications: [notif] }); })
         .then(function () {
-          soundDiag.sched = 'OK ' + hhmmss(at) + ' / ' + (notif.sound || '音なし') +
-            (granted === null ? '（許可の確認は時間切れ）' : '');
+          soundDiag.sched = 'OK ' + hhmmss(at) + ' / ' + (notif.sound || '音なし');
           return refreshPendingDiag();
         })
-        .catch(function (e) { soundDiag.sched = 'NG: ' + errText(e); });
-    }).catch(function (e) { soundDiag.sched = 'NG: ' + errText(e); });
+        .catch(function (e) {
+          soundDiag.sched = 'NG: ' + errText(e);
+          noteAppError('通知の予約', e);
+        })
+        .then(renderSoundDiag);
+    } catch (e) {
+      soundDiag.sched = 'NG: ' + errText(e);
+      noteAppError('通知の予約', e);
+    }
+  }
+
+  /* ---- 通知の予約は「まず出す、あとで直す」 ----
+     iOSのWebViewは、アプリが後ろに回った時点でJSの実行を止める。
+     そのため「許可の確認」や「通知音の準備」の完了を待ってから予約する作りにすると、
+     待っている最中にアプリを閉じられた回は ln.schedule() に到達せず、予約そのものが消える。
+     タイマーを開始してすぐ他のアプリに切り替えるのはいちばん普通の使い方なので、
+     この待ち合わせは「通知が来ないことがある」と同義だった。
+
+     同じ id で schedule するとOS側の予約は置き換わるので、
+     先に出しておいて後から出し直しても二重に鳴ることはない。
+     予約前に cancel していたのもやめた（cancel の完了を待っていなかったため、
+     順序が入れ替わると予約したばかりの通知を自分で消す可能性があった）。 */
+  function scheduleTimerNotification(endAtMs) {
+    if (!isNativeApp()) { soundDiag.sched = '—（ブラウザ版）'; return; }
+    var ln = nativePlugin('LocalNotifications');
+    if (!ln) { soundDiag.sched = 'NG: 通知プラグインが読み込まれていない'; return; }
+    if (!timerSettings.notifyOn) { soundDiag.sched = '—（システム通知がOFF）'; return; }
+    if (endAtMs <= Date.now()) { soundDiag.sched = 'NG: 終了時刻が過去'; return; }
+
+    // ① 何も待たずに予約する。この1行がアプリを閉じられても残る
+    pushNotif(ln, TIMER_NOTIF_ID, '休憩終了！ 次のセットへ', endAtMs);
+
+    // ② 許可はそのあとで確認する。初回は許可を求めるダイアログが出るが、
+    //    その間はアプリが前面なのでJSは止まらない。取れたら同じidで出し直す
+    withTimeout(ensureNotifPermission(), PERM_WAIT_MS, null)
+      .then(function (granted) {
+        if (granted === false) { soundDiag.sched = 'NG: 通知が許可されていない'; return; }
+        // 待っている間にタイマーが止まった・時間が変わったなら、その回の予約はもう関係ない
+        if (!timer.running || timer.paused || timer.finished || timer.endAt !== endAtMs) return;
+        // 終了直前だと出し直しが「過去の時刻」として弾かれ、成功済みの表示を上書きしてしまう
+        if (endAtMs - Date.now() < 1500) return;
+        pushNotif(ln, TIMER_NOTIF_ID, '休憩終了！ 次のセットへ', endAtMs);
+      })
+      .catch(function (e) { noteAppError('通知の許可確認', e); });
+
+    // ③ 音の準備は予約と切り離して進める（間に合った回から音が付く）。
+    //    通知音は本体に同梱してあるので、そもそも準備を待つ必要はない
+    ensureNotificationSounds();
   }
 
   /* 設定画面の「通知テスト」。タイマーを5分回さなくても10秒で試せるようにする。 */
   function runNotifTest() {
     var out = $('#testNotifResult');
     function say(t) { if (out) out.textContent = t; }
+    if (!isNativeApp()) { say('ブラウザ版では試せません（アプリ版のみ）'); return; }
     var ln = nativePlugin('LocalNotifications');
-    if (!isNativeApp() || !ln) { say('ブラウザ版では試せません（アプリ版のみ）'); return; }
-    say('準備中…');
-    try { runNotifTestInner(ln, say); }
-    catch (e) { say('NG: ' + errText(e)); noteAppError('通知テスト', e); renderSoundDiag(); }
+    if (!ln) { say('NG: 通知プラグインが読み込まれていません'); return; }
+
+    // タイマー本体と同じく、待たずにまず予約する
+    var atMs = Date.now() + 10000;
+    pushNotif(ln, TEST_NOTIF_ID, 'テスト通知です（10秒後）', atMs);
+    say('予約しました。' + hhmmss(new Date(atMs)) + ' に鳴ります。今すぐホーム画面に戻るか画面を消して待ってください');
+
+    withTimeout(ensureNotifPermission(), PERM_WAIT_MS, null)
+      .then(function (granted) {
+        if (granted === false) {
+          say('NG: 通知が許可されていません。iPhoneの「設定 > 通知 > 筋トレLog」を開いて「通知を許可」をONにしてください');
+        }
+        return refreshPendingDiag();
+      })
+      .then(renderSoundDiag)
+      .catch(function (e) { noteAppError('通知テスト', e); });
+    ensureNotificationSounds();
   }
 
-  function runNotifTestInner(ln, say) {
-    Promise.all([
-      withTimeout(ensureNotifPermission(), PERM_WAIT_MS, null),
-      withTimeout(ensureNotificationSounds(), SOUND_WAIT_MS, false)
-    ]).then(function (r) {
-      if (r[0] === false) {
-        say('NG: 通知が許可されていません。iPhoneの「設定 > 通知 > 筋トレLog」を開いて「通知を許可」をONにしてください');
-        return renderSoundDiag();
-      }
-      var at = new Date(Date.now() + 10000);
-      var notif = buildNotif(TEST_NOTIF_ID, 'テスト通知です（10秒後）', at);
-      return ln.schedule({ notifications: [notif] })
-        .then(function () {
-          say('予約OK。' + hhmmss(at) + ' に鳴ります。今すぐホーム画面に戻るか画面を消して待ってください');
-          soundDiag.sched = 'テストOK ' + hhmmss(at) + ' / ' + (notif.sound || '音なし');
-          return refreshPendingDiag().then(renderSoundDiag);
-        })
-        .catch(function (e) {
-          say('NG: 予約に失敗しました（' + errText(e) + '）');
-          soundDiag.sched = 'テストNG: ' + errText(e);
-          renderSoundDiag();
-        });
-    }).catch(function (e) { say('NG: ' + errText(e)); });
-  }
-
+  /* cancel が消すのは「まだ配信されていない予約」だけ。配信済みの通知には効かない。 */
   function cancelTimerNotification() {
     var ln = nativePlugin('LocalNotifications');
     if (!ln) return;
     try {
       ln.cancel({ notifications: [{ id: TIMER_NOTIF_ID }] }).catch(function () { /* noop */ });
+    } catch (e) { /* noop */ }
+  }
+
+  /* 配信済みの通知を通知センターから消す。
+     終了時に予約を取り消さなくなったぶん、前回のお知らせが残り続けるので、
+     次にタイマーを始めるとき・リセットするときに片づける。 */
+  function clearDeliveredTimerNotification() {
+    var ln = nativePlugin('LocalNotifications');
+    if (!ln || !ln.removeDeliveredNotifications) return;
+    try {
+      var r = ln.removeDeliveredNotifications({ notifications: [{ id: TIMER_NOTIF_ID }] });
+      if (r && r.catch) r.catch(function () { /* noop */ });
     } catch (e) { /* noop */ }
   }
 
@@ -3433,22 +3459,43 @@
      navigator.vibrate は iOS の WKWebView に存在せず、これまでiPhoneでは一度も振動していなかった。
      ネイティブ版は Capacitor の Haptics（CoreHaptics）で鳴らす。
      Haptics はアプリが前面にあるときだけ効くので、閉じているときの振動は通知側が担当する。 */
-  var VIBRATE_PULSE_MS = 500;   // 1回の振動の長さ
+  var VIBRATE_PULSE_MS = 500;   // 1回の振動の長さ（Hapticsを使う場合）
   var VIBRATE_GAP_MS = 800;     // 次の振動までの間隔
   var VIBRATE_REPEAT = 7;       // 合計 約5.6秒
   function vibrateAlarm() {
     if (!timerSettings.vibrateOn) return;
     stopVibrate();
-    var hp = nativePlugin('Haptics');
-    if (isNativeApp() && hp) {
-      var left = VIBRATE_REPEAT;
-      var pulse = function () {
-        if (left-- <= 0) { stopVibrate(); return; }
-        try { hp.vibrate({ duration: VIBRATE_PULSE_MS }).catch(function () { /* noop */ }); } catch (e) { /* noop */ }
-      };
-      pulse();
-      timer.vibrateTimer = setInterval(pulse, VIBRATE_GAP_MS);
-      return;
+    if (isNativeApp()) {
+      // 自前プラグインの振動を先に試す。Haptics の CoreHaptics は
+      // エンジンの寿命が呼び出しスコープに縛られていて途切れることがあるため、
+      // 確実に動く AudioServices 側を本命にし、Haptics は控えに回す
+      var aa = nativePlugin('AlarmAudio');
+      var hp = nativePlugin('Haptics');
+      /* Capacitor の registerPlugin はプロキシを返すので、ネイティブ側の登録が漏れていても
+         JSからは vibrate が関数に見える（呼んで初めて reject でわかる）。
+         したがって「あるかどうか」ではなく「呼んで失敗したか」で控えに切り替える。 */
+      var fallback = false;
+      function haptics() {
+        if (!hp) return;
+        try { hp.vibrate({ duration: VIBRATE_PULSE_MS }).catch(function () { /* noop */ }); }
+        catch (e) { /* noop */ }
+      }
+      if (aa || hp) {
+        var left = VIBRATE_REPEAT;
+        var pulse = function () {
+          if (left-- <= 0) { stopVibrate(); return; }
+          if (fallback || !aa) { haptics(); return; }
+          try {
+            var r = aa.vibrate();
+            if (r && r.catch) {
+              r.catch(function () { fallback = true; haptics(); });
+            }
+          } catch (e) { fallback = true; haptics(); }
+        };
+        pulse();
+        timer.vibrateTimer = setInterval(pulse, VIBRATE_GAP_MS);
+        return;
+      }
     }
     // Android Chrome など navigator.vibrate があるブラウザ向け（iOS Safariには無い）
     try {
@@ -3466,8 +3513,10 @@
       if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
     } catch (e) { /* noop */ }
   }
+  /* ブラウザ版専用。iOSのWKWebViewには Notification が無いので、
+     アプリ版でここを通ってもただの死にコードになる（アプリ版はOSに予約した通知が出る） */
   function showTimerNotification() {
-    if (!timerSettings.notifyOn) return;
+    if (!timerSettings.notifyOn || isNativeApp()) return;
     try {
       if (!('Notification' in window) || Notification.permission !== 'granted') return;
       var opts = { body: '休憩終了！ 次のセットへ', tag: 'kintore-timer', renotify: true, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png' };
@@ -3517,6 +3566,7 @@
     unlockAudio();
     askNotify();
     clearBadge();
+    clearDeliveredTimerNotification(); // 前回のお知らせを通知センターから片づける
     stopBeep();
     stopVibrate();
     timer.total = seconds;
@@ -3539,8 +3589,12 @@
     timer.finished = true;
     timer.remaining = 0;
     releaseWakeLock();
-    // アプリが動いている状態で終わったので、OSに預けた通知はもう要らない
-    cancelTimerNotification();
+    /* 時間どおりに終わったときは、OSに預けた予約を取り消してはいけない。
+       cancel が消すのは「まだ配信されていない予約」なので、
+       OSがまさに今出そうとしているバナーを、こちらから叩き落とすことになる。
+       （アプリを開いたまま待っているとバナーが出ないのはこれが原因だった）
+       「−30秒」などで終了時刻より手前に終わらせた場合だけ取り消す。 */
+    if (timer.endAt - Date.now() > 1500) cancelTimerNotification();
     playAlarmSound();
     vibrateAlarm();
     showTimerNotification();
@@ -3586,6 +3640,7 @@
     timer.running = false; timer.paused = false; timer.finished = false;
     releaseWakeLock();
     cancelTimerNotification();
+    clearDeliveredTimerNotification();
     clearBadge();
     setTimerView('setup');
     renderTimer();
@@ -3868,5 +3923,9 @@
     if (document.visibilityState !== 'hidden') return;
     autoSync({ keepalive: true });
     writeNativeBackup();
+    /* ここから先はJSが止まる。動作中のタイマーがあれば予約を出し直しておく。
+       開始時の予約が何らかの理由でOSに届いていなくても、この一手で拾える
+       （同じidなので二重にはならない）。 */
+    if (timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
   });
 })();
