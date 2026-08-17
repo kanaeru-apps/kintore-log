@@ -2,7 +2,7 @@
 
 ## 現在地（2026-08-17 時点 / 最初にここを読む）
 
-**バージョン**：`v0.13.8` ／ `sw.js` の `CACHE` は `kintore-v52`
+**バージョン**：`v0.13.9` ／ `sw.js` の `CACHE` は `kintore-v53`
 
 **いま追っている問題**：App Store提出前の実機検証。**通知が1件も配信されない**。
 
@@ -16,6 +16,20 @@
 | 前面で音が二重に鳴らない | ✅ 二重にはならない（ただしバナー自体が出ていないので証拠としては弱い） |
 | 消音スイッチONでも前面のアラーム音が鳴る | ✅ v0.13.7 / 実機（2026-08-17・トグルON/OFFいずれでも鳴る） |
 | アプリの**アイコンにバッジ**が付く | ❌ 付かない。ただし `buildNotif()` が `badge` を渡していないので**元から付かない**（9.12-5） |
+
+**v0.13.8 実機診断で特定した主原因**：`AlarmAudioPlugin` がiOSへ登録されていなかった。
+`Main.storyboard` では `MainViewController` を指定していたが、`SceneDelegate` が起動時に
+`CAPBridgeViewController()` を直接生成してStoryboardのViewControllerを上書きしていたため、
+`MainViewController.capacitorDidLoad()` と `registerPluginInstance(AlarmAudioPlugin())` が実行されていなかった。
+実機診断では、消音モード・iPhone側通知設定・通知音実ファイルの全経路が
+`"AlarmAudio" plugin is not implemented on ios` で失敗した。
+
+**v0.13.9 の修正**：`SceneDelegate` のrootを `MainViewController()` に変更し、
+自前プラグインの登録経路を実際の起動経路へ一致させた。これにより消音モードON/OFF、
+通知設定取得、通知音ファイル確認、設定アプリを開く処理が同時に復旧する。
+なお `@capacitor/local-notifications@8.2.1` のiOS実装は通知スキーマの `badge` 値を
+`UNMutableNotificationContent.badge` へ設定する処理を持たないため、JSへ `badge: 1` を足すだけでは直らない。
+バックグラウンド時のアイコンバッジは通知表示の復旧後に別途対応する。
 
 **v0.13.4 実機の結果（2026-08-17）**：JS もネイティブプラグインも生きている
 （アプリ内アラーム音・振動が動く＝ `AlarmAudioPlugin` は登録されている）のに、

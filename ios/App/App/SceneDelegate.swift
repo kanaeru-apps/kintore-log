@@ -8,7 +8,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
-        window?.rootViewController = CAPBridgeViewController()
+        // AlarmAudioPlugin は MainViewController.capacitorDidLoad() で登録する。
+        // CAPBridgeViewController を直接生成すると Storyboard の customClass が使われず、
+        // JS からは "AlarmAudio plugin is not implemented on ios" になる。
+        window?.rootViewController = MainViewController()
         window?.makeKeyAndVisible()
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
