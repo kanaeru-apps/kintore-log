@@ -2,7 +2,7 @@
 
 ## 現在地（2026-08-17 時点 / 最初にここを読む）
 
-**バージョン**：`v0.13.9` ／ `sw.js` の `CACHE` は `kintore-v53`
+**バージョン**：`v0.13.10` ／ `sw.js` の `CACHE` は `kintore-v54`
 
 **いま追っている問題**：App Store提出前の実機検証。**通知が1件も配信されない**。
 
@@ -30,6 +30,20 @@
 なお `@capacitor/local-notifications@8.2.1` のiOS実装は通知スキーマの `badge` 値を
 `UNMutableNotificationContent.badge` へ設定する処理を持たないため、JSへ `badge: 1` を足すだけでは直らない。
 バックグラウンド時のアイコンバッジは通知表示の復旧後に別途対応する。
+
+**v0.13.9 実機結果**：自前プラグイン登録、消音モードON/OFF、前面アラーム、
+バックグラウンド通知がすべて正常動作することを確認した。
+
+**v0.13.10 の修正**：バックグラウンド通知の配信時にアイコンバッジを1へ設定する。
+JSの通知データへ `badge: 1` を追加し、`@capacitor/local-notifications@8.2.1` のiOS実装が
+その値を `UNMutableNotificationContent.badge` へ反映する最小パッチを `build-ios.js` で適用する。
+`node_modules` はCodemagicの `npm install` で毎回再生成されるため、生成後に必ず走る
+ビルドスクリプトへ入れた。既知の差し込み位置が見つからなければビルドを停止する。
+さらに、通知が付けたバッジをアプリ起動・復帰時に確実に消すため、`AlarmAudioPlugin` に
+`setBadge(value)` を追加した。iOS 16以降は `UNUserNotificationCenter.setBadgeCount`、
+それ以前は `UIApplication.applicationIconBadgeNumber` を使い、Web Badging APIは予備経路とする。
+通常の初期化時にも `clearBadge()` を呼び、通知からのコールド起動で
+`visibilitychange` が発火しない場合もバッジを残さない。
 
 **v0.13.4 実機の結果（2026-08-17）**：JS もネイティブプラグインも生きている
 （アプリ内アラーム音・振動が動く＝ `AlarmAudioPlugin` は登録されている）のに、

@@ -101,8 +101,30 @@ public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "soundFiles", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "notificationSettings", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "vibrate", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "openSettings", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "openSettings", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setBadge", returnType: CAPPluginReturnPromise)
     ]
+
+    /// アプリアイコンのバッジ数を設定する。0で消去する。
+    /// 通知自身が背面で付けたバッジは、WebViewの navigator.clearAppBadge が
+    /// 利用できない環境でも、アプリを開いた時点で確実に消せる必要がある。
+    @objc public func setBadge(_ call: CAPPluginCall) {
+        let value = max(0, call.getInt("value") ?? 0)
+        DispatchQueue.main.async {
+            if #available(iOS 16.0, *) {
+                UNUserNotificationCenter.current().setBadgeCount(value) { error in
+                    if let error = error {
+                        call.reject("Unable to set app badge", nil, error)
+                    } else {
+                        call.resolve(["value": value])
+                    }
+                }
+            } else {
+                UIApplication.shared.applicationIconBadgeNumber = value
+                call.resolve(["value": value])
+            }
+        }
+    }
 
     /// iPhone の「設定 > 筋トレLog」を開く。
     ///

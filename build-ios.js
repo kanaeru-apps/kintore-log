@@ -94,7 +94,43 @@ function copyInto(name) {
   else fs.copyFileSync(src, dest);
 }
 
+/* @capacitor/local-notifications 8.2.1 のiOS実装は、設定の
+   presentationOptions に "badge" を受け付ける一方で、通知データの badge 値を
+   UNMutableNotificationContent.badge へコピーしていない。
+   そのままではアプリが背面にいるとJSの navigator.setAppBadge() が動かず、
+   通知が届いてもアイコンにバッジが付かない。
+
+   node_modules は npm install のたびに作り直されるため、Codemagicでも必ず通る
+   build-ios.js で最小パッチを冪等に適用する。対象実装が変わって既知の差し込み位置を
+   見つけられない場合は、黙ってバッジ無しのIPAを作らずビルドを停止する。 */
+function patchLocalNotificationsBadge() {
+  const swiftPath = path.join(
+    ROOT, 'node_modules', '@capacitor', 'local-notifications', 'ios', 'Sources',
+    'LocalNotificationsPlugin', 'LocalNotificationsPlugin.swift'
+  );
+  if (!fs.existsSync(swiftPath)) {
+    throw new Error(`@capacitor/local-notifications のiOS実装が見つかりません: ${swiftPath}`);
+  }
+
+  const badgeBlock = `        // kintore-log: apply the icon badge when the notification is delivered\n` +
+    `        if let badge = notification["badge"] as? Int {\n` +
+    `            content.badge = NSNumber(value: badge)\n` +
+    `        }\n\n`;
+  let swift = fs.readFileSync(swiftPath, 'utf8');
+  if (swift.includes(badgeBlock)) return;
+
+  const soundBlock = `        if let sound = notification["sound"] as? String {\n` +
+    `            content.sound = UNNotificationSound(named: UNNotificationSoundName(sound))\n` +
+    `        }\n`;
+  if (!swift.includes(soundBlock)) {
+    throw new Error('LocalNotificationsPlugin.swift の既知の差し込み位置が見つかりません。依存更新を確認してください。');
+  }
+  swift = swift.replace(soundBlock, badgeBlock + soundBlock);
+  fs.writeFileSync(swiftPath, swift, 'utf8');
+}
+
 /* ---- 1. www/ を作り直してソースをコピー ---- */
+patchLocalNotificationsBadge();
 resetWww();
 // sounds/ はタイマーのアラーム音。アプリ内再生と、Library/Sounds/ へコピーして使う
 // 通知音の両方がこのファイルを参照するため、ネイティブ版にも必ず同梱する

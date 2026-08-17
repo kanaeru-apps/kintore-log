@@ -2691,6 +2691,9 @@
       id: id,
       title: '筋トレLog',
       body: body,
+      // iOSでは配信時にこの値をUNMutableNotificationContent.badgeへ反映する。
+      // 背面ではJSが止まりnavigator.setAppBadge()を呼べないため、通知自身に持たせる。
+      badge: 1,
       schedule: { at: at, allowWhileIdle: true }
     };
     /* sound を渡さないと content.sound が nil のまま＝音の出ない通知になる。
@@ -3826,8 +3829,26 @@
       }
     } catch (e) { /* noop */ }
   }
-  function setBadge() { try { if (navigator.setAppBadge) navigator.setAppBadge(1); } catch (e) { /* noop */ } }
-  function clearBadge() { try { if (navigator.clearAppBadge) navigator.clearAppBadge(); } catch (e) { /* noop */ } }
+  function setNativeBadge(value) {
+    var alarm = nativePlugin('AlarmAudio');
+    if (!isNativeApp() || !alarm || !alarm.setBadge) return false;
+    try {
+      var p = alarm.setBadge({ value: value });
+      if (p && p.catch) p.catch(function (e) { noteAppError('バッジの更新', e); });
+      return true;
+    } catch (e) {
+      noteAppError('バッジの更新', e);
+      return false;
+    }
+  }
+  function setBadge() {
+    if (setNativeBadge(1)) return;
+    try { if (navigator.setAppBadge) navigator.setAppBadge(1); } catch (e) { /* noop */ }
+  }
+  function clearBadge() {
+    if (setNativeBadge(0)) return;
+    try { if (navigator.clearAppBadge) navigator.clearAppBadge(); } catch (e) { /* noop */ }
+  }
 
   /* ---- 画面スリープ抑止（Wake Lock） ---- */
   function requestWakeLock() {
@@ -4254,6 +4275,10 @@
   loadWeightStepSettings();
   initTheme();
   renderLog(true);
+
+  // 通知で付いたバッジを、コールド起動時にも必ず消す。
+  // 最初からvisibleで起動した場合はvisibilitychangeが発火しないため、復帰時処理だけでは不足する。
+  clearBadge();
 
   // 機種変更・再インストール後の初回起動なら、端末内バックアップから記録を読み戻す
   // （記録が1件でもある端末では何もしない）
