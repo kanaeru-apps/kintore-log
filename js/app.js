@@ -2474,7 +2474,9 @@
      予約は開始・時間延長・再開のたびに取り直し、停止・終了時に取り消す。 */
   var TIMER_NOTIF_ID = 1;
   var TEST_NOTIF_ID = 2;
-  var notifPermissionAsked = false;
+  /* 確認ダイアログを今出しているところか。返事が来たら必ず戻す。
+     アプリが前面に戻ったときにも戻す（ダイアログを出したまま他アプリへ行かれた場合の受け皿） */
+  var notifPermissionAsking = false;
   /* 許可のダイアログはユーザーが答えるまで返らないので長めに待つ。
      ただし待つのは「予約を出したあと」なので、待っている間に何が起きても予約は残る */
   var PERM_WAIT_MS = 20000;
@@ -2520,9 +2522,72 @@
       .then(function (r) {
         if (!r) { soundDiag.ios = '取得できず'; return; }
         soundDiag.ios = '音' + r.sound + ' / バナー' + r.alert + ' / ロック画面' + r.lockScreen +
-          ' / 表示' + r.alertStyle + '（' + r.status + '）';
+          ' / 表示' + r.alertStyle + ' / 要約' + (r.summary || '不明') + '（' + r.status + '）';
       })
       .catch(function (e) { soundDiag.ios = 'NG: ' + errText(e); });
+  }
+
+  /* 通知が出せない状態のとき、タイマー画面の一番上に理由を出す。
+     これまでは許可が無くても画面上は何も変わらず、ただ静かに何も起きなかった。
+     鳴らない理由が設定画面の診断欄にしか無いのは、気付けないのと同じ。
+     押すと iPhone の「設定 > 筋トレLog」を開く。 */
+  function describeNotifBlock(perm, ios) {
+    if (!isNativeApp()) return null;
+    if (!timerSettings.notifyOn) return null;   // 自分でオフにしている場合は警告しない
+    if (!nativePlugin('LocalNotifications')) {
+      return { title: '通知の仕組みを読み込めていません', body: 'アプリを一度終了して開き直してください。直らない場合は再インストールが必要です' };
+    }
+    if (perm === 'denied') {
+      return { title: '通知が許可されていません', body: 'このままだとアプリを閉じている間タイマーのお知らせが届きません。タップして「通知を許可」をオンにしてください' };
+    }
+    if (perm && perm !== 'granted') {
+      return { title: '通知の許可がまだ済んでいません', body: 'タイマーを開始すると確認が出ます。「許可」を選ぶまでアプリを閉じないでください' };
+    }
+    if (!ios) return null;
+    if (ios.status && ios.status.indexOf('仮承認') === 0) {
+      return { title: '通知が「静かに配信」になっています', body: 'バナーも音も出ずに通知センターにだけ溜まります。タップして通知スタイルを変更してください' };
+    }
+    if (ios.alert === 'オフ') {
+      return { title: 'バナー表示がオフです', body: '通知は届きますが画面には出ません。タップして「バナー」「ロック画面」をオンにしてください' };
+    }
+    if (timerSettings.soundOn && ios.sound === 'オフ') {
+      return { title: 'iPhone側で通知音がオフです', body: 'アプリを閉じている間の通知が無音になります。タップして「サウンド」をオンにしてください' };
+    }
+    if (ios.summary === 'オン') {
+      return { title: '「通知の要約」に入っています', body: 'タイマーの終了時刻ではなく、まとめ配信の時間まで通知が保留されます。タップして要約から外してください' };
+    }
+    return null;
+  }
+
+  function renderNotifWarning(info) {
+    var el = $('#trNotifWarn');
+    if (!el) return;
+    if (!info) { el.hidden = true; el.innerHTML = ''; return; }
+    el.innerHTML = '';
+    var b = document.createElement('b');
+    b.textContent = '⚠ ' + info.title;
+    var span = document.createElement('span');
+    span.textContent = info.body;
+    el.appendChild(b);
+    el.appendChild(span);
+    el.hidden = false;
+  }
+
+  /* 許可とiOS設定を読み直して警告を出し直す */
+  function refreshNotifWarning() {
+    if (!isNativeApp()) return Promise.resolve();
+    var ln = nativePlugin('LocalNotifications');
+    var alarm = nativePlugin('AlarmAudio');
+    var permP = ln ? Promise.resolve().then(function () { return ln.checkPermissions(); })
+      .then(function (r) { return (r && r.display) || null; }, function () { return null; })
+      : Promise.resolve(null);
+    var iosP = alarm ? Promise.resolve().then(function () { return alarm.notificationSettings(); })
+      .then(function (r) { return r || null; }, function () { return null; })
+      : Promise.resolve(null);
+    return Promise.all([permP, iosP]).then(function (v) {
+      soundDiag.perm = v[0] || soundDiag.perm;
+      renderNotifWarning(describeNotifBlock(v[0], v[1]));
+    }, function () { /* noop */ });
   }
 
   /* OSが実際に予約を受け取ったかを確認する。
@@ -2544,6 +2609,30 @@
       .catch(function (e) { soundDiag.pending = 'NG: ' + errText(e); });
   }
 
+  /* 「OSが通知を配信したのか、そもそも配信していないのか」を分けるための欄。
+     予約はOKなのに何も出ない場合、
+       ・ここが 0件 → OSまで届いていない（許可・予約時刻の問題）
+       ・ここに件数がある → 配信はされたが画面に出ていない（要約・集中モード・設定の問題）
+     と原因が二分できる。通知センターに残っているものを数えるので、
+     通知を手で消したあとだと 0件 に戻る点だけ注意。 */
+  function refreshDeliveredDiag() {
+    var ln = nativePlugin('LocalNotifications');
+    if (!isNativeApp() || !ln || !ln.getDeliveredNotifications) {
+      soundDiag.delivered = '—（ブラウザ版）';
+      return Promise.resolve();
+    }
+    return Promise.resolve()
+      .then(function () { return ln.getDeliveredNotifications(); })
+      .then(function (r) {
+        var list = (r && r.notifications) || [];
+        if (!list.length) { soundDiag.delivered = '0件（通知センターに無し）'; return; }
+        soundDiag.delivered = list.length + '件: ' + list.map(function (n) {
+          return '#' + n.id;
+        }).join(' / ');
+      })
+      .catch(function (e) { soundDiag.delivered = 'NG: ' + errText(e); });
+  }
+
   function ensureNotifPermission() {
     var ln = nativePlugin('LocalNotifications');
     if (!ln) return Promise.resolve(false);
@@ -2552,10 +2641,21 @@
       .then(function (r) {
         if (r && r.display === 'granted') return true;
         if (r && r.display === 'denied') return false;
-        // 起動直後ではなく「タイマーを初めて使うとき」に許可を求める（拒否されにくくするため）
-        if (notifPermissionAsked) return false;
-        notifPermissionAsked = true;
-        return ln.requestPermissions().then(function (r2) { return !!(r2 && r2.display === 'granted'); });
+        /* 起動直後ではなく「タイマーを初めて使うとき」に許可を求める（拒否されにくくするため）。
+           フラグは「今まさに確認ダイアログを出している最中か」だけを表す。
+           ここを「一度でも聞いたか」にすると、ダイアログを出した直後にホーム画面へ戻られた場合
+           （＝返事が返らずJSも止まる）に、以後そのアプリ起動中は二度と許可を求められなくなる。
+           iOS はシステムのダイアログをインストールごとに一度しか出さず、
+           答え済みなら即座に結果だけ返すので、聞き直しても画面がうるさくなることはない。 */
+        if (notifPermissionAsking) return false;
+        notifPermissionAsking = true;
+        return ln.requestPermissions().then(function (r2) {
+          notifPermissionAsking = false;
+          return !!(r2 && r2.display === 'granted');
+        }, function () {
+          notifPermissionAsking = false;
+          return false;
+        });
       })
       .catch(function () { return false; });
   }
@@ -3287,7 +3387,7 @@
      予約そのものが失敗したのか・OSまで届いているのかを切り分けるためのもの。 */
   var soundDiag = {
     play: '未実行', notif: '未実行', session: '未実行',
-    sched: '未実行', pending: '未確認',
+    sched: '未実行', pending: '未確認', delivered: '未確認',
     files: '未確認', ios: '未確認', perm: '未確認'
   };
   var SILENT_WAV_URL = (function () {
@@ -3580,6 +3680,9 @@
     scheduleTimerNotification(timer.endAt);
     setTimerView('running');
     renderTimer();
+    /* 予約を出したあとで状態を見に行く。許可ダイアログの結果が反映されるよう少し置く */
+    refreshNotifWarning();
+    setTimeout(refreshNotifWarning, 3000);
   }
   function finishTimer() {
     if (timer.finished) return;
@@ -3728,9 +3831,29 @@
     $('#trAgain').addEventListener('click', againTimer);
     $('#trReset').addEventListener('click', resetTimer);
 
+    /* 警告バーを押したら iPhone の設定を開く。
+       通知を一度「許可しない」にすると、アプリからは二度と確認ダイアログを出せないので、
+       設定アプリへ送るのが唯一の直し方になる */
+    var warn = $('#trNotifWarn');
+    if (warn) {
+      warn.addEventListener('click', function () {
+        var alarm = nativePlugin('AlarmAudio');
+        if (!alarm || !alarm.openSettings) return;
+        try {
+          var r = alarm.openSettings();
+          if (r && r.catch) r.catch(function (e) { noteAppError('設定を開く', e); });
+        } catch (e) { noteAppError('設定を開く', e); }
+      });
+    }
+
     // バックグラウンド復帰時：経過を反映し、必要ならWake Lockを取り直す
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState !== 'visible') return;
+      /* ダイアログを出したまま他アプリへ行かれていた場合、返事は永遠に来ない。
+         戻ってきた時点で 「確認中」 を解いておかないと、以後許可を求め直せなくなる */
+      notifPermissionAsking = false;
+      // 設定アプリで通知を切り替えて戻ってきた場合に、その場で警告を消す／出す
+      refreshNotifWarning();
       // タイマーがTIME UP画面のまま残っていても、アプリを開いた時点でバッジは消す
       clearBadge();
       if (timer.running && !timer.paused && !timer.finished) {
@@ -3746,6 +3869,9 @@
     if (!timer.twBound) { loadCustomMin(); bindTimer(); }
     if (!timer.running && !timer.finished) { setTimerView('setup'); scrollTwToCustom(); }
     renderTimer();
+    /* タイマー画面を開いた時点で、通知が出せない状態なら先に知らせる。
+       「開始して5分待ったが鳴らなかった」より前に気付けるようにする */
+    refreshNotifWarning();
   }
 
   /* ================== 設定：タイマー（アラーム音・通知） ================== */
@@ -3815,6 +3941,7 @@
     }
     // OSに聞かないと分からないものは、画面を開くたびに取り直す
     fillDiag('#diagPending', refreshPendingDiag, function () { return soundDiag.pending; });
+    fillDiag('#diagDelivered', refreshDeliveredDiag, function () { return soundDiag.delivered; });
     fillDiag('#diagIos', refreshIosNotifDiag, function () { return soundDiag.ios; });
     fillDiag('#diagFiles', function () {
       return readSoundFiles().then(function (r) { soundDiag.files = describeSoundFiles(r); });
@@ -3868,6 +3995,7 @@
         cancelTimerNotification(); // OFFにした以上、OSに預けた予約も取り消す
       }
       setTimeout(renderSoundDiag, 400);
+      setTimeout(refreshNotifWarning, 600);
     });
     var testBtn = $('#testNotifBtn');
     if (testBtn) testBtn.addEventListener('click', runNotifTest);

@@ -1983,6 +1983,17 @@ button { cursor: pointer; }
 
 .timer-note { font-size: 11px; color: var(--dim); line-height: 1.7; margin-top: 14px; }
 
+/* 通知が出せない状態の警告。押すと設定の「音の状態」へ飛ぶ。
+   鳴らない原因が画面のどこにも出ないのが一番困るので、タイマー画面の一番上に置く */
+.notif-warn {
+  display: block; width: 100%; text-align: left; margin: 0 0 14px;
+  padding: 11px 13px; border-radius: 12px; font: inherit; font-size: 12px; line-height: 1.65;
+  color: var(--danger); background: rgba(255, 98, 98, 0.10);
+  border: 1px solid rgba(255, 98, 98, 0.38); cursor: pointer;
+}
+.notif-warn:active { background: rgba(255, 98, 98, 0.18); }
+.notif-warn b { display: block; font-size: 13px; margin-bottom: 2px; }
+
 /* 実行中／終了 */
 .timer-run { display: none; flex-direction: column; align-items: center; padding: 6px 0 0; }
 #view-timer.running #timerSetup { display: none; }

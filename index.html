@@ -17,7 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.13.4">
+<link rel="stylesheet" href="css/style.css?v=0.13.5">
 <!-- テーマの初期設定。CSSより先に <html data-theme> を決めておかないと、起動の一瞬だけ
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
@@ -117,6 +117,9 @@
     <!-- ============ タイマー ============ -->
     <section id="view-timer" class="view">
       <header class="page-header"><p class="eyebrow">INTERVAL</p><h2>タイマー</h2></header>
+
+      <!-- 通知が出せない状態のときだけ出る。黙って鳴らないのが一番困るので画面上に出す -->
+      <button class="notif-warn" id="trNotifWarn" type="button" hidden></button>
 
       <!-- セットアップ（プリセット＋カスタム） -->
       <div id="timerSetup">
@@ -288,7 +291,7 @@
 
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレLog v0.13.4 — Phase 8</p>
+      <p class="version">筋トレLog v0.13.5 — Phase 8</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -338,6 +341,7 @@
           <div class="s-row"><div class="s-main"><b>iPhone側の通知設定</b><small id="diagIos">—</small></div></div>
           <div class="s-row"><div class="s-main"><b>通知の予約</b><small id="diagSched">—</small></div></div>
           <div class="s-row"><div class="s-main"><b>OSに入っている予約</b><small id="diagPending">—</small></div></div>
+          <div class="s-row"><div class="s-main"><b>配信された通知</b><small id="diagDelivered">—</small></div></div>
           <div class="s-row"><div class="s-main"><b>通知音の実ファイル</b><small id="diagFiles">—</small></div></div>
           <div class="s-row"><div class="s-main"><b>アプリ内エラー</b><small id="diagErr">—</small></div></div>
         </div>
@@ -565,9 +569,9 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.13.4"></script>
-<script src="js/app.js?v=0.13.4"></script>
-<script src="js/charts.js?v=0.13.4"></script>
+<script src="js/db.js?v=0.13.5"></script>
+<script src="js/app.js?v=0.13.5"></script>
+<script src="js/charts.js?v=0.13.5"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});

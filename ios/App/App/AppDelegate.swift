@@ -100,8 +100,27 @@ public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "installSounds", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "soundFiles", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "notificationSettings", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "vibrate", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "vibrate", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openSettings", returnType: CAPPluginReturnPromise)
     ]
+
+    /// iPhone の「設定 > 筋トレLog」を開く。
+    ///
+    /// 通知が許可されていないとき、アプリ側からは二度と許可ダイアログを出せない
+    /// （iOS はインストールごとに一度しか出さない）。設定アプリへ案内するしか復旧手段がないため、
+    /// その一手をアプリ内から踏めるようにしておく。
+    @objc public func openSettings(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard let url = URL(string: UIApplication.openSettingsURLString),
+                  UIApplication.shared.canOpenURL(url) else {
+                call.resolve(["opened": false])
+                return
+            }
+            UIApplication.shared.open(url, options: [:]) { ok in
+                call.resolve(["opened": ok])
+            }
+        }
+    }
 
     /// 端末を振動させる。
     ///
@@ -238,13 +257,21 @@ public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             case .alert: style = "通知"
             @unknown default: style = "不明"
             }
+            /// 「通知の要約」に入れられていると、指定した時刻ではなく
+            /// まとめ配信の時間まで保留される。＝タイマーが鳴らない、と同じ症状になる。
+            /// 許可もサウンドもオンなのに来ない場合の数少ない残りの原因なので必ず見る。
+            var summary = "非対応"
+            if #available(iOS 15.0, *) {
+                summary = label(settings.scheduledDeliverySetting)
+            }
             call.resolve([
                 "status": status,
                 "sound": label(settings.soundSetting),
                 "alert": label(settings.alertSetting),
                 "lockScreen": label(settings.lockScreenSetting),
                 "notificationCenter": label(settings.notificationCenterSetting),
-                "alertStyle": style
+                "alertStyle": style,
+                "summary": summary
             ])
         }
     }
