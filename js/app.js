@@ -7,6 +7,28 @@
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
 
+  /* ---- アプリ内で起きた例外を記録する ----
+     ネイティブ版はブラウザの開発者ツールが使えないため、JSがどこかで落ちても
+     画面上は「表示が更新されないだけ」になり、実機では何も分からなくなる。
+     ここで拾って設定画面の「アプリ内エラー」に出す。
+     診断用の soundDiag は後方で定義されるので、それより前に起きた例外も
+     取りこぼさないよう、この変数に貯めておく。 */
+  var lastAppError = '';
+  function noteAppError(label, e) {
+    var msg = '';
+    if (e && e.message) msg = e.message;
+    else if (typeof e === 'string') msg = e;
+    else if (e && e.reason) msg = String(e.reason.message || e.reason);
+    else msg = String(e);
+    lastAppError = label + ': ' + msg.slice(0, 120);
+  }
+  window.addEventListener('error', function (ev) {
+    noteAppError('例外', ev && (ev.error || ev.message));
+  });
+  window.addEventListener('unhandledrejection', function (ev) {
+    noteAppError('未処理のPromise', ev);
+  });
+
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
   var PART_CLASS = { '胸': 'chest', '背中': 'back', '脚': 'leg', '肩': 'shoulder', '腕': 'arm', '腹': 'core', '有酸素': 'cardio', 'その他': 'etc' };
   var CARDIO_PART = '有酸素';
@@ -2280,13 +2302,26 @@
      音源を作り直したら ALARM_ASSET_VERSION を上げてコピーし直させること。 */
   var ALARM_ASSET_VERSION = '2';
   var ALARM_ASSET_KEY = 'kintore_notif_sound_ver';
+  /* ネイティブ呼び出しを待つ上限。返ってこない場合に備えた保険で、
+     通常はどれも一瞬で返る */
+  var NATIVE_WAIT_MS = 4000;
   var notifSoundsReady = false;
   var notifSoundsPromise = null;
 
   /* コピーは起動時に1回走らせるが、通知を予約する側もこれを待つ。
      コピー前に予約してしまうと、その回だけ音の無い通知になるため。 */
   function ensureNotificationSounds() {
-    if (!notifSoundsPromise) notifSoundsPromise = installNotificationSounds();
+    if (!notifSoundsPromise) {
+      // 一度でも reject させると、キャッシュした Promise が以後ずっと失敗を返し続ける。
+      // 失敗は「音が付かない」だけの話なので、必ず false に畳んで解決させる。
+      // Promise.resolve().then() を挟むのは、中で同期例外が出たときに
+      // .catch() まで届かずここから外へ投げ出されるのを防ぐため
+      notifSoundsPromise = Promise.resolve().then(installNotificationSounds).catch(function (e) {
+        soundDiag.notif = 'NG: ' + errText(e);
+        noteAppError('通知音の準備', e);
+        return false;
+      });
+    }
     return notifSoundsPromise;
   }
 
@@ -2298,9 +2333,16 @@
   function readSoundFiles() {
     var alarm = nativePlugin('AlarmAudio');
     if (!isNativeApp() || !alarm) return Promise.resolve(null);
-    return alarm.soundFiles({ names: soundKeys() })
-      .then(function (r) { return r || null; })
-      .catch(function () { return null; });
+    // ネイティブ側が返してこない場合に備えて必ず打ち切る。
+    // 呼び出し自体が同期例外を投げても Promise に畳む
+    return withTimeout(
+      Promise.resolve()
+        .then(function () { return alarm.soundFiles({ names: soundKeys() }); })
+        .then(function (r) { return r || null; })
+        // 握りつぶすと実機で何が起きたのか分からなくなるので、内容だけは残す
+        .catch(function (e) { noteAppError('通知音の確認', e); return null; }),
+      NATIVE_WAIT_MS, null
+    );
   }
 
   /* 通知音がどこに在るかを1行にまとめる。
@@ -2321,6 +2363,8 @@
 
   function installNotificationSounds() {
     if (!isNativeApp()) { soundDiag.notif = '—（ブラウザ版）'; return Promise.resolve(false); }
+    // 途中で止まったときに「未実行」と区別が付くようにしておく
+    soundDiag.notif = '準備中…';
     return readSoundFiles().then(function (r) {
       var files = (r && r.files) || [];
       var bundled = (r && r.bundled) || [];
@@ -2354,8 +2398,13 @@
     var alarm = nativePlugin('AlarmAudio');
     if (!alarm) { soundDiag.notif = 'NG: AlarmAudio未登録'; return Promise.resolve(false); }
     var names = SOUND_PATTERNS.map(function (p) { return p.key; });
-    return alarm.installSounds({ names: names })
+    // 返ってこないと通知の予約まで道連れになるので、ここも必ず打ち切る
+    return withTimeout(
+      Promise.resolve().then(function () { return alarm.installSounds({ names: names }); }),
+      NATIVE_WAIT_MS, 'timeout'
+    )
       .then(function (r) {
+        if (r === 'timeout') { soundDiag.notif = 'NG: コピーの応答なし（時間切れ）'; return false; }
         if (r && r.ok) {
           notifSoundsReady = true;
           try { localStorage.setItem(ALARM_ASSET_KEY, ALARM_ASSET_VERSION); } catch (e) { /* noop */ }
@@ -2368,7 +2417,11 @@
         soundDiag.notif = 'NG: ' + ((r && (r.reason || (r.failed || []).join(','))) || '理由不明');
         return false;
       })
-      .catch(function (e) { soundDiag.notif = 'NG: ' + errText(e); return false; });
+      .catch(function (e) {
+        soundDiag.notif = 'NG: ' + errText(e);
+        noteAppError('通知音のコピー', e);
+        return false;
+      });
   }
 
   /* 予備の経路：ネイティブ側が古いビルドで installSounds を持っていない場合に使う */
@@ -2422,10 +2475,36 @@
   var TIMER_NOTIF_ID = 1;
   var TEST_NOTIF_ID = 2;
   var notifPermissionAsked = false;
+  /* 許可のダイアログはユーザーが答えるまで返らないので長め、
+     音の準備は裏方なので短めで見切る */
+  var PERM_WAIT_MS = 20000;
+  var SOUND_WAIT_MS = 2000;
 
   function errText(e) {
     if (!e) return '理由不明';
     return String(e.message || e.errorMessage || e).slice(0, 90);
+  }
+
+  /* 返ってこないネイティブ呼び出しで処理全体が止まらないようにする。
+     時間切れでも reject せず fallback を返す（呼び出し側は分岐せずに済む）。
+     これが無かったために、音の準備が返ってこないと通知の予約まで
+     道連れで止まり、実機では「何も起きない」状態になっていた。 */
+  function withTimeout(promise, ms, fallback) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var t = setTimeout(function () {
+        if (done) return;
+        done = true;
+        resolve(fallback);
+      }, ms);
+      Promise.resolve(promise).then(function (v) {
+        if (done) return;
+        done = true; clearTimeout(t); resolve(v);
+      }, function () {
+        if (done) return;
+        done = true; clearTimeout(t); resolve(fallback);
+      });
+    });
   }
   function hhmmss(d) {
     function p(n) { return ('0' + n).slice(-2); }
@@ -2469,7 +2548,8 @@
   function ensureNotifPermission() {
     var ln = nativePlugin('LocalNotifications');
     if (!ln) return Promise.resolve(false);
-    return ln.checkPermissions()
+    return Promise.resolve()
+      .then(function () { return ln.checkPermissions(); })
       .then(function (r) {
         if (r && r.display === 'granted') return true;
         if (r && r.display === 'denied') return false;
@@ -2507,14 +2587,28 @@
     if (!timerSettings.notifyOn) { soundDiag.sched = '—（システム通知がOFF）'; return; }
     cancelTimerNotification();
     soundDiag.sched = '予約中…';
-    Promise.all([ensureNotifPermission(), ensureNotificationSounds()]).then(function (r) {
-      if (!r[0]) { soundDiag.sched = 'NG: 通知が許可されていない'; return; }
+    // 予約に至るまでのどこで同期例外が出ても、必ず診断に残す
+    try { scheduleTimerNotificationInner(ln, endAtMs); }
+    catch (e) { soundDiag.sched = 'NG: ' + errText(e); noteAppError('通知の予約', e); }
+  }
+
+  function scheduleTimerNotificationInner(ln, endAtMs) {
+    Promise.all([
+      // 許可の確認はユーザーがダイアログに答えるのを待つことがあるので長めに取る
+      withTimeout(ensureNotifPermission(), PERM_WAIT_MS, null),
+      // 音の準備は「間に合えば待つ」だけ。返ってこなくても予約は必ず出す。
+      // 音が付かない通知は、通知が出ないことより明らかにましなので待ち続けてはいけない
+      withTimeout(ensureNotificationSounds(), SOUND_WAIT_MS, false)
+    ]).then(function (r) {
+      var granted = r[0];
+      if (granted === false) { soundDiag.sched = 'NG: 通知が許可されていない'; return; }
       if (endAtMs <= Date.now()) { soundDiag.sched = 'NG: 終了時刻が過去'; return; }
       var at = new Date(endAtMs);
       var notif = buildNotif(TIMER_NOTIF_ID, '休憩終了！ 次のセットへ', at);
       return ln.schedule({ notifications: [notif] })
         .then(function () {
-          soundDiag.sched = 'OK ' + hhmmss(at) + ' / ' + (notif.sound || '音なし');
+          soundDiag.sched = 'OK ' + hhmmss(at) + ' / ' + (notif.sound || '音なし') +
+            (granted === null ? '（許可の確認は時間切れ）' : '');
           return refreshPendingDiag();
         })
         .catch(function (e) { soundDiag.sched = 'NG: ' + errText(e); });
@@ -2528,8 +2622,16 @@
     var ln = nativePlugin('LocalNotifications');
     if (!isNativeApp() || !ln) { say('ブラウザ版では試せません（アプリ版のみ）'); return; }
     say('準備中…');
-    Promise.all([ensureNotifPermission(), ensureNotificationSounds()]).then(function (r) {
-      if (!r[0]) {
+    try { runNotifTestInner(ln, say); }
+    catch (e) { say('NG: ' + errText(e)); noteAppError('通知テスト', e); renderSoundDiag(); }
+  }
+
+  function runNotifTestInner(ln, say) {
+    Promise.all([
+      withTimeout(ensureNotifPermission(), PERM_WAIT_MS, null),
+      withTimeout(ensureNotificationSounds(), SOUND_WAIT_MS, false)
+    ]).then(function (r) {
+      if (r[0] === false) {
         say('NG: 通知が許可されていません。iPhoneの「設定 > 通知 > 筋トレLog」を開いて「通知を許可」をONにしてください');
         return renderSoundDiag();
       }
@@ -3160,7 +3262,7 @@
   var soundDiag = {
     play: '未実行', notif: '未実行', session: '未実行',
     sched: '未実行', pending: '未確認',
-    files: '未確認', ios: '未確認'
+    files: '未確認', ios: '未確認', perm: '未確認'
   };
   var SILENT_WAV_URL = (function () {
     // 1chモノラル・8kHz・16bit・約0.05秒(400サンプル)の無音WAV。ArrayBufferは既定でゼロ埋めなのでそのまま無音になる
@@ -3619,33 +3721,49 @@
     $('#soundDiagSection').hidden = !isNativeApp();
     renderSoundDiag();
   }
+  /* OSへの問い合わせが返ってこないと、欄が「確認中…」のまま固まって
+     何が起きているのか実機から読み取れない。時間切れをはっきり書き出す。 */
+  var DIAG_WAIT_MS = 4000;
+  function fillDiag(sel, work, get) {
+    var el = $(sel);
+    if (!el) return Promise.resolve();
+    el.textContent = '確認中…';
+    var answered = false;
+    var p = Promise.resolve()
+      .then(work)
+      .then(function () { answered = true; })
+      .catch(function (e) { answered = true; noteAppError('診断', e); });
+    return withTimeout(p, DIAG_WAIT_MS, null).then(function () {
+      el.textContent = answered ? get() : '確認が返ってきません（時間切れ）';
+    });
+  }
+
   /* 「鳴らない」ときにどこで止まっているかを見せる */
   function renderSoundDiag() {
     if (!isNativeApp()) return;
-    $('#diagPlay').textContent = soundDiag.play;
-    $('#diagNotif').textContent = soundDiag.notif;
-    $('#diagSession').textContent = soundDiag.session;
-    $('#diagSched').textContent = soundDiag.sched;
-    $('#diagPending').textContent = soundDiag.pending;
-    $('#diagFiles').textContent = soundDiag.files;
-    $('#diagIos').textContent = soundDiag.ios;
-    var permEl = $('#diagPerm');
-    permEl.textContent = '確認中…';
+    // ここで例外が出ると全欄が初期表示のまま残り、実機では「何も出ていない」ようにしか見えない
+    try {
+      $('#diagPlay').textContent = soundDiag.play;
+      $('#diagNotif').textContent = soundDiag.notif;
+      $('#diagSession').textContent = soundDiag.session;
+      $('#diagSched').textContent = soundDiag.sched;
+      $('#diagErr').textContent = lastAppError || 'なし';
+    } catch (e) { noteAppError('診断表示', e); }
+
     var ln = nativePlugin('LocalNotifications');
     if (ln) {
-      ln.checkPermissions()
-        .then(function (r) { permEl.textContent = (r && r.display) || '不明'; })
-        .catch(function () { permEl.textContent = 'NG: 確認できず'; });
+      fillDiag('#diagPerm', function () {
+        return ln.checkPermissions().then(function (r) { soundDiag.perm = (r && r.display) || '不明'; });
+      }, function () { return soundDiag.perm; });
     } else {
-      permEl.textContent = 'NG: プラグイン未登録';
+      $('#diagPerm').textContent = 'NG: プラグイン未登録';
     }
     // OSに聞かないと分からないものは、画面を開くたびに取り直す
-    refreshPendingDiag().then(function () { $('#diagPending').textContent = soundDiag.pending; });
-    refreshIosNotifDiag().then(function () { $('#diagIos').textContent = soundDiag.ios; });
-    readSoundFiles().then(function (r) {
-      soundDiag.files = describeSoundFiles(r);
-      $('#diagFiles').textContent = soundDiag.files;
-    });
+    fillDiag('#diagPending', refreshPendingDiag, function () { return soundDiag.pending; });
+    fillDiag('#diagIos', refreshIosNotifDiag, function () { return soundDiag.ios; });
+    fillDiag('#diagFiles', function () {
+      return readSoundFiles().then(function (r) { soundDiag.files = describeSoundFiles(r); });
+    }, function () { return soundDiag.files; });
   }
   var timerSettingsBound = false;
   function bindTimerSettingsOnce() {

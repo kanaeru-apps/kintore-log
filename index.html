@@ -17,7 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.13.2">
+<link rel="stylesheet" href="css/style.css?v=0.13.3">
 <!-- テーマの初期設定。CSSより先に <html data-theme> を決めておかないと、起動の一瞬だけ
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
@@ -288,7 +288,7 @@
 
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレLog v0.13.2 — Phase 8</p>
+      <p class="version">筋トレLog v0.13.3 — Phase 8</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -339,6 +339,7 @@
           <div class="s-row"><div class="s-main"><b>通知の予約</b><small id="diagSched">—</small></div></div>
           <div class="s-row"><div class="s-main"><b>OSに入っている予約</b><small id="diagPending">—</small></div></div>
           <div class="s-row"><div class="s-main"><b>通知音の実ファイル</b><small id="diagFiles">—</small></div></div>
+          <div class="s-row"><div class="s-main"><b>アプリ内エラー</b><small id="diagErr">—</small></div></div>
         </div>
         <p class="s-note">音が鳴らないときは、この画面のアラーム音を1つタップして試聴してみてください。ここで鳴るのに終了時に鳴らない場合と、ここでも鳴らない場合とで原因が違います。</p>
         <div class="panel-list">
@@ -564,9 +565,9 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.13.2"></script>
-<script src="js/app.js?v=0.13.2"></script>
-<script src="js/charts.js?v=0.13.2"></script>
+<script src="js/db.js?v=0.13.3"></script>
+<script src="js/app.js?v=0.13.3"></script>
+<script src="js/charts.js?v=0.13.3"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});
