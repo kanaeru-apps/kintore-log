@@ -2365,10 +2365,11 @@
     if (!isNativeApp()) { soundDiag.notif = '—（ブラウザ版）'; return Promise.resolve(false); }
     // 途中で止まったときに「未実行」と区別が付くようにしておく
     soundDiag.notif = '準備中…';
+    var filesToken = claimDiag('files');
     return readSoundFiles().then(function (r) {
       var files = (r && r.files) || [];
       var bundled = (r && r.bundled) || [];
-      soundDiag.files = describeSoundFiles(r);
+      writeDiag('files', filesToken, describeSoundFiles(r));
 
       // アプリ本体に同梱されていれば、UNNotificationSound はそのまま見つけられる。
       // コピーという失敗しうる手順を踏まずに済むので、これを本命にする
@@ -2409,8 +2410,9 @@
           notifSoundsReady = true;
           try { localStorage.setItem(ALARM_ASSET_KEY, ALARM_ASSET_VERSION); } catch (e) { /* noop */ }
           soundDiag.notif = 'OK (ネイティブでコピー)';
+          var filesToken = claimDiag('files');
           return readSoundFiles().then(function (f) {
-            soundDiag.files = describeSoundFiles(f);
+            writeDiag('files', filesToken, describeSoundFiles(f));
             return true;
           });
         }
@@ -2437,8 +2439,9 @@
       notifSoundsReady = true;
       try { localStorage.setItem(ALARM_ASSET_KEY, ALARM_ASSET_VERSION); } catch (e) { /* noop */ }
       soundDiag.notif = 'OK (Filesystemでコピー)';
+      var filesToken = claimDiag('files');
       return readSoundFiles().then(function (f) {
-        soundDiag.files = describeSoundFiles(f);
+        writeDiag('files', filesToken, describeSoundFiles(f));
         return true;
       });
     }).catch(function (e) {
@@ -2517,14 +2520,14 @@
      バナーは出るのに無音になる。checkPermissions() では区別できないため自前で見る。 */
   function refreshIosNotifDiag() {
     var alarm = nativePlugin('AlarmAudio');
-    if (!isNativeApp() || !alarm) { soundDiag.ios = '—（ブラウザ版）'; return Promise.resolve(); }
+    if (!isNativeApp() || !alarm) return Promise.resolve('—（ブラウザ版）');
     return alarm.notificationSettings()
       .then(function (r) {
-        if (!r) { soundDiag.ios = '取得できず'; return; }
-        soundDiag.ios = '音' + r.sound + ' / バナー' + r.alert + ' / ロック画面' + r.lockScreen +
+        if (!r) return '取得できず';
+        return '音' + r.sound + ' / バナー' + r.alert + ' / ロック画面' + r.lockScreen +
           ' / 表示' + r.alertStyle + ' / 要約' + (r.summary || '不明') + '（' + r.status + '）';
       })
-      .catch(function (e) { soundDiag.ios = 'NG: ' + errText(e); });
+      .catch(function (e) { return 'NG: ' + errText(e); });
   }
 
   /* 通知が出せない状態のとき、タイマー画面の一番上に理由を出す。
@@ -2576,6 +2579,11 @@
   /* 許可とiOS設定を読み直して警告を出し直す */
   function refreshNotifWarning() {
     if (!isNativeApp()) return Promise.resolve();
+    /* ここも許可を聞き直すので、診断欄の「許可」を書く資格を取ってから始める。
+       取れなかったときに前の値を書き戻すのは、
+       ①元々「取れなければ前の値を残す」仕様だったのを変えないため
+       ②追い越した以上ここが書かないと欄が「確認中…」のまま固まるため。 */
+    var permToken = claimDiag('perm');
     var ln = nativePlugin('LocalNotifications');
     var alarm = nativePlugin('AlarmAudio');
     var permP = ln ? Promise.resolve().then(function () { return ln.checkPermissions(); })
@@ -2585,7 +2593,7 @@
       .then(function (r) { return r || null; }, function () { return null; })
       : Promise.resolve(null);
     return Promise.all([permP, iosP]).then(function (v) {
-      soundDiag.perm = v[0] || soundDiag.perm;
+      writeDiag('perm', permToken, v[0] || soundDiag.perm);
       renderNotifWarning(describeNotifBlock(v[0], v[1]));
     }, function () { /* noop */ });
   }
@@ -2604,28 +2612,27 @@
      「予約したつもり」と「本当に予約できた」を分けて見られるようにする。
      判定にも使うので、取得できたかどうか（ok）と中身を呼び出し側へ返す。
      問い合わせ自体が失敗した場合を 0件 と同じ扱いにすると、
-     「OSが予約を捨てた」と「OSに聞けなかった」を取り違えるため必ず区別する。 */
+     「OSが予約を捨てた」と「OSに聞けなかった」を取り違えるため必ず区別する。
+     ここでは soundDiag に直接書かず、表示用の文言（text）も一緒に返すだけにする。
+     どの問い合わせが最新かを判断できるのは呼び出し側なので、書き込みはそちらに任せる。 */
   function readPending() {
     var ln = nativePlugin('LocalNotifications');
     if (!isNativeApp() || !ln) {
-      soundDiag.pending = '—（ブラウザ版）';
-      return Promise.resolve({ ok: false, list: [], why: 'ブラウザ版' });
+      return Promise.resolve({ ok: false, list: [], why: 'ブラウザ版', text: '—（ブラウザ版）' });
     }
     return Promise.resolve()
       .then(function () { return ln.getPending(); })
       .then(function (r) {
         var list = (r && r.notifications) || [];
-        soundDiag.pending = describePending(list);
-        return { ok: true, list: list };
+        return { ok: true, list: list, text: describePending(list) };
       })
       .catch(function (e) {
         var why = errText(e);
-        soundDiag.pending = 'NG: ' + why;
-        return { ok: false, list: [], why: why };
+        return { ok: false, list: [], why: why, text: 'NG: ' + why };
       });
   }
   function refreshPendingDiag() {
-    return readPending().then(function () { /* 表示だけ更新する */ });
+    return readPending().then(function (res) { return res.text; });
   }
 
   /* 「OSが通知を配信したのか、そもそも配信していないのか」を分けるための欄。
@@ -2637,19 +2644,18 @@
   function refreshDeliveredDiag() {
     var ln = nativePlugin('LocalNotifications');
     if (!isNativeApp() || !ln || !ln.getDeliveredNotifications) {
-      soundDiag.delivered = '—（ブラウザ版）';
-      return Promise.resolve();
+      return Promise.resolve('—（ブラウザ版）');
     }
     return Promise.resolve()
       .then(function () { return ln.getDeliveredNotifications(); })
       .then(function (r) {
         var list = (r && r.notifications) || [];
-        if (!list.length) { soundDiag.delivered = '0件（通知センターに無し）'; return; }
-        soundDiag.delivered = list.length + '件: ' + list.map(function (n) {
+        if (!list.length) return '0件（通知センターに無し）';
+        return list.length + '件: ' + list.map(function (n) {
           return '#' + n.id;
         }).join(' / ');
       })
-      .catch(function (e) { soundDiag.delivered = 'NG: ' + errText(e); });
+      .catch(function (e) { return 'NG: ' + errText(e); });
   }
 
   function ensureNotifPermission() {
@@ -2712,40 +2718,69 @@
      少し待って聞き直し、確認が取れてはじめて OK と書く。 */
   var PENDING_CONFIRM_TRIES = 6;
   var PENDING_CONFIRM_WAIT_MS = 400;
+  /* 予約は常に同じidで置き換える作りなので、idの一致だけでは
+     「今回の時刻に置き換わった」ことを確かめられない。前回の予約が残っているだけでも
+     一致してしまい、＋30秒・一時停止からの再開・通知音の変更・通知テストの連打のように
+     同じidを出し直す操作では、置き換えが失敗していても OK と表示されてしまう。
+     そこで時刻も突き合わせる。getPending が返す時刻は
+     LocalNotificationsHandler.makePendingNotificationRequestJSObject が
+     ISO8601DateFormatter で文字列にしたもので、ミリ秒が落ちて秒単位に丸まる。
+     丸めの分だけずれるので、1秒までの差は同じ予約とみなす。 */
+  var PENDING_AT_TOLERANCE_MS = 1000;
 
   function laterMs(ms) {
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
 
-  /* 指定idがOSの予約一覧に現れるまで聞き直す。
-     found=入っている / missing=入っていない / fired=もう時刻を過ぎた（消えていて当然）
-     / error=OSに聞けなかった、の4つを区別して返す。 */
-  function confirmScheduled(id, atMs, tries) {
+  /* OSが返した予約の時刻をミリ秒にする。読み取れなければ null。 */
+  function pendingAtMs(n) {
+    var raw = n && n.schedule ? n.schedule.at : null;
+    if (raw === null || raw === undefined || raw === '') return null;
+    var t = (raw instanceof Date) ? raw.getTime() : new Date(raw).getTime();
+    return isNaN(t) ? null : t;
+  }
+
+  /* 指定idが「今回の時刻で」OSの予約一覧に現れるまで聞き直す。
+     found=今回の時刻で入っている / stale=同じidの古い予約が残ったまま
+     / missing=そもそも入っていない / fired=もう時刻を過ぎた（消えていて当然）
+     / error=OSに聞けなかった、の5つを区別して返す。
+     pendToken は「OS予約」欄を書く資格。追い越されたら書かずに調べるだけにする。 */
+  function confirmScheduled(id, atMs, tries, pendToken) {
     return readPending().then(function (res) {
+      writeDiag('pending', pendToken, res.text);
       if (!res.ok) return { state: 'error', why: res.why };
+      var stale = null;
       for (var i = 0; i < res.list.length; i++) {
-        if (res.list[i] && String(res.list[i].id) === String(id)) {
-          return { state: 'found', notif: res.list[i] };
-        }
+        var n = res.list[i];
+        if (!n || String(n.id) !== String(id)) continue;
+        var t = pendingAtMs(n);
+        /* 時刻が読み取れない場合まで「違う」と決めつけると、
+           予約は正しく置き換わっているのに NG と出す診断になってしまう。
+           判定できないものは、これまでどおり id の一致で足りたことにする。 */
+        if (t === null) return { state: 'found', notif: n };
+        if (Math.abs(t - atMs) <= PENDING_AT_TOLERANCE_MS) return { state: 'found', notif: n };
+        stale = { at: t, notif: n };   // idは合うが時刻が違う＝置き換え待ち
       }
-      // 確認している間に予定時刻を過ぎたなら、消えているのが正しい姿
-      if (atMs <= Date.now()) return { state: 'fired' };
-      if (tries <= 1) return { state: 'missing' };
+      /* 確認している間に予定時刻を過ぎたなら、消えているのが正しい姿。
+         ただし古い予約が居座っているなら「消えて当然」では説明できないので、
+         そちらを優先して最後まで置き換わるか見る。 */
+      if (!stale && atMs <= Date.now()) return { state: 'fired' };
+      if (tries <= 1) {
+        return stale ? { state: 'stale', at: stale.at, notif: stale.notif } : { state: 'missing' };
+      }
       return laterMs(PENDING_CONFIRM_WAIT_MS).then(function () {
-        return confirmScheduled(id, atMs, tries - 1);
+        return confirmScheduled(id, atMs, tries - 1, pendToken);
       });
     });
   }
 
   /* 診断欄をまるごと描き直すとOSへの問い合わせが連鎖するので、
      予約の進み具合だけを書き換えたいときはこちらを使う。
-     予約の確認で OSに聞いた結果も一緒に届いているので、その欄も合わせて直す。 */
+     予約の確認で一緒に分かる「OS予約」欄は writeDiag が書くので、ここでは触らない。 */
   function renderSchedDiag() {
     try {
       var el = $('#diagSched');
       if (el) el.textContent = soundDiag.sched;
-      var pend = $('#diagPending');
-      if (pend) pend.textContent = soundDiag.pending;
     } catch (e) { /* 表示できないだけなので握りつぶす */ }
   }
 
@@ -2756,10 +2791,14 @@
      上書きしてしまう。番号を配って、追い越された書き手は黙るようにする。 */
   var schedSeq = 0;
   function claimSched() { return ++schedSeq; }
+  /* 書けたかどうかを返す。追い越された確認は内部エラーの記録もやめさせる
+     （＋30秒などで予約を出し直すと、古い確認は必ず「置き換わっていない」と見えるため、
+       そのままだと実害の無い失敗が内部エラー欄に溜まってしまう）。 */
   function writeSched(token, text) {
-    if (token !== schedSeq) return;   // もっと新しい書き手がいるので何もしない
+    if (token !== schedSeq) return false;   // もっと新しい書き手がいるので何もしない
     soundDiag.sched = text;
     renderSchedDiag();
+    return true;
   }
 
   /* 実際にOSへ予約を投げる。ここは何も待たずに呼べること自体が要件なので、
@@ -2769,6 +2808,8 @@
     var notif = buildNotif(id, body, at);
     var label = hhmmss(at) + ' / ' + (notif.sound || '音なし');
     var token = claimSched();
+    // 確認の途中経過で「OS予約」欄も書き換わるので、その資格もここで取る
+    var pendToken = claimDiag('pending');
     writeSched(token, '予約中… ' + hhmmss(at));
     try {
       Promise.resolve()
@@ -2776,7 +2817,7 @@
         .then(function () {
           // ここではまだ「渡した」だけ。OSが受け取ったかは次で確かめる
           writeSched(token, '受付 ' + label + '（OSに確認中…）');
-          return confirmScheduled(id, atMs, PENDING_CONFIRM_TRIES);
+          return confirmScheduled(id, atMs, PENDING_CONFIRM_TRIES, pendToken);
         })
         .then(function (res) {
           if (res.state === 'found') {
@@ -2784,20 +2825,25 @@
           } else if (res.state === 'fired') {
             writeSched(token, '受付 ' + label + '（予定時刻を過ぎたため確認できず）');
           } else if (res.state === 'error') {
-            writeSched(token, '受付 ' + label + '（確認できず: ' + res.why + '）');
-            noteAppError('通知の予約確認', res.why);
+            if (writeSched(token, '受付 ' + label + '（確認できず: ' + res.why + '）')) {
+              noteAppError('通知の予約確認', res.why);
+            }
+          } else if (res.state === 'stale') {
+            var old = (res.at === null || res.at === undefined) ? '時刻不明' : hhmmss(new Date(res.at));
+            if (writeSched(token, 'NG: 同じIDの古い予約が残っている（OS ' + old + ' → 今回 ' + hhmmss(at) + '）')) {
+              noteAppError('通知の予約', '同じidの予約が今回の時刻に置き換わらない（OS: ' + old + ' / 今回: ' + hhmmss(at) + '）');
+            }
           } else {
-            writeSched(token, 'NG: OSに予約が入っていない ' + label);
-            noteAppError('通知の予約', 'schedule後もOSの予約一覧に現れない（OSが受理しなかった）');
+            if (writeSched(token, 'NG: OSに予約が入っていない ' + label)) {
+              noteAppError('通知の予約', 'schedule後もOSの予約一覧に現れない（OSが受理しなかった）');
+            }
           }
         })
         .catch(function (e) {
-          writeSched(token, 'NG: ' + errText(e));
-          noteAppError('通知の予約', e);
+          if (writeSched(token, 'NG: ' + errText(e))) noteAppError('通知の予約', e);
         });
     } catch (e) {
-      writeSched(token, 'NG: ' + errText(e));
-      noteAppError('通知の予約', e);
+      if (writeSched(token, 'NG: ' + errText(e))) noteAppError('通知の予約', e);
     }
   }
 
@@ -2860,7 +2906,7 @@
         if (granted === false) {
           say('NG: 通知が許可されていません。iPhoneの「設定 > 通知 > 筋トレLog」を開いて「通知を許可」をONにしてください');
         }
-        return refreshPendingDiag();
+        // 予約一覧は renderSoundDiag が取り直す。ここで先に聞くと同じ問い合わせが二重になる
       })
       .then(renderSoundDiag)
       .catch(function (e) { noteAppError('通知テスト', e); });
@@ -3494,6 +3540,37 @@
     files: '未確認', ios: '未確認', perm: '未確認', foreground: '未確認'
   };
 
+  /* ---- OSに聞いて埋める欄は「いちばん新しい問い合わせ」だけが書ける ----
+     許可・予約一覧・iOS設定などは、画面を開く／タイマーを開始する／前面に戻る、の
+     どれでも問い合わせが走るため、同じ欄に複数の問い合わせが同時に飛ぶ。
+     素朴に書くと、先に始まって遅れて返ってきた古い問い合わせ（や、その4秒の時間切れ）が
+     あとから確定した新しい結果を上書きして、画面に古い状態を出してしまう。
+     欄ごとに通し番号を配り、追い越された問い合わせは成功・失敗・時間切れのどれでも黙る。
+     書き込みと画面反映をここに集約してあるので、soundDiag と表示がずれることもない。 */
+  var DIAG_TARGET = {
+    perm: '#diagPerm', pending: '#diagPending', delivered: '#diagDelivered',
+    ios: '#diagIos', files: '#diagFiles'
+  };
+  var diagSeq = {};
+  function claimDiag(key) {
+    diagSeq[key] = (diagSeq[key] || 0) + 1;
+    return diagSeq[key];
+  }
+  /* 書けたかどうかを返す。書けなかった＝追い越された、なので
+     呼び出し側もエラー記録などの後始末をやめる目印に使える。 */
+  function writeDiag(key, token, text) {
+    if (token !== diagSeq[key]) return false;
+    soundDiag[key] = text;
+    var sel = DIAG_TARGET[key];
+    if (sel) {
+      try {
+        var el = $(sel);
+        if (el) el.textContent = text;
+      } catch (e) { /* 表示できないだけなので握りつぶす */ }
+    }
+    return true;
+  }
+
   /* ---- 前面にいるときの通知の出方 ----
      capacitor.config.json の LocalNotifications.presentationOptions と対になる写し。
      この設定値はJSからは読めないので、ここに同じ内容を置いて診断に出す。
@@ -4027,26 +4104,35 @@
   /* OSへの問い合わせが返ってこないと、欄が「確認中…」のまま固まって
      何が起きているのか実機から読み取れない。時間切れをはっきり書き出す。 */
   var DIAG_WAIT_MS = 4000;
-  /* key は soundDiag のどの欄を担当するか。
+  /* key は soundDiag のどの欄を担当するか。work は表示する文言を返す。
      失敗や時間切れのときに前回の値を残すと、たとえば許可が取れなくなった回でも
      古い「granted」がそのまま出て、診断そのものが嘘をつく。
-     ここで必ず失敗として上書きしてから表示する。 */
+     ここで必ず失敗として上書きしてから表示する。
+     ただし上書きしてよいのは、この問い合わせが今もその欄の最新である場合だけ。
+     欄ごとに番号を取り、成功・失敗・時間切れのどの道でも writeDiag を通す。
+     work の中で soundDiag を直接書かせないのも同じ理由で、
+     そうしないと追い越された問い合わせが表示だけ古い値に戻してしまう。 */
   function fillDiag(sel, key, work) {
     var el = $(sel);
     if (!el) return Promise.resolve();
+    var token = claimDiag(key);
     el.textContent = '確認中…';
-    var done = false;
+    var settled = false;
     var p = Promise.resolve()
       .then(work)
-      .then(function () { done = true; })
+      .then(function (text) {
+        settled = true;
+        writeDiag(key, token, (text === null || text === undefined) ? '取得できず' : String(text));
+      })
       .catch(function (e) {
-        done = true;
-        soundDiag[key] = 'NG: ' + errText(e);
-        noteAppError('診断', e);
+        settled = true;
+        if (writeDiag(key, token, 'NG: ' + errText(e))) noteAppError('診断', e);
       });
     return withTimeout(p, DIAG_WAIT_MS, null).then(function () {
-      if (!done) soundDiag[key] = '確認が返ってきません（時間切れ）';
-      el.textContent = soundDiag[key];
+      if (settled) return;
+      /* 時間切れを出したあとにこの問い合わせが遅れて返ってきても、
+         「返ってこなかった」という事実の方を残す。番号を進めて資格を失わせる。 */
+      if (writeDiag(key, token, '確認が返ってきません（時間切れ）')) claimDiag(key);
     });
   }
 
@@ -4068,18 +4154,17 @@
     var ln = nativePlugin('LocalNotifications');
     if (ln) {
       fillDiag('#diagPerm', 'perm', function () {
-        return ln.checkPermissions().then(function (r) { soundDiag.perm = (r && r.display) || '不明'; });
+        return ln.checkPermissions().then(function (r) { return (r && r.display) || '不明'; });
       });
     } else {
-      soundDiag.perm = 'NG: プラグイン未登録';
-      $('#diagPerm').textContent = soundDiag.perm;
+      writeDiag('perm', claimDiag('perm'), 'NG: プラグイン未登録');
     }
     // OSに聞かないと分からないものは、画面を開くたびに取り直す
     fillDiag('#diagPending', 'pending', refreshPendingDiag);
     fillDiag('#diagDelivered', 'delivered', refreshDeliveredDiag);
     fillDiag('#diagIos', 'ios', refreshIosNotifDiag);
     fillDiag('#diagFiles', 'files', function () {
-      return readSoundFiles().then(function (r) { soundDiag.files = describeSoundFiles(r); });
+      return readSoundFiles().then(describeSoundFiles);
     });
   }
   var timerSettingsBound = false;
