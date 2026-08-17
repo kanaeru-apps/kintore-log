@@ -2590,23 +2590,42 @@
     }, function () { /* noop */ });
   }
 
+  function describePending(list) {
+    if (!list.length) return '0件（OSに予約なし）';
+    return list.length + '件: ' + list.map(function (n) {
+      var at = n && n.schedule && n.schedule.at ? new Date(n.schedule.at) : null;
+      var when = (at && !isNaN(at.getTime())) ? hhmmss(at) : '時刻不明';
+      return '#' + n.id + ' ' + when;
+    }).join(' / ');
+  }
+
   /* OSが実際に予約を受け取ったかを確認する。
      schedule() が成功しても、日時の受け渡しがおかしければここで空になるので、
-     「予約したつもり」と「本当に予約できた」を分けて見られるようにする。 */
-  function refreshPendingDiag() {
+     「予約したつもり」と「本当に予約できた」を分けて見られるようにする。
+     判定にも使うので、取得できたかどうか（ok）と中身を呼び出し側へ返す。
+     問い合わせ自体が失敗した場合を 0件 と同じ扱いにすると、
+     「OSが予約を捨てた」と「OSに聞けなかった」を取り違えるため必ず区別する。 */
+  function readPending() {
     var ln = nativePlugin('LocalNotifications');
-    if (!isNativeApp() || !ln) { soundDiag.pending = '—（ブラウザ版）'; return Promise.resolve(); }
-    return ln.getPending()
+    if (!isNativeApp() || !ln) {
+      soundDiag.pending = '—（ブラウザ版）';
+      return Promise.resolve({ ok: false, list: [], why: 'ブラウザ版' });
+    }
+    return Promise.resolve()
+      .then(function () { return ln.getPending(); })
       .then(function (r) {
         var list = (r && r.notifications) || [];
-        if (!list.length) { soundDiag.pending = '0件（OSに予約なし）'; return; }
-        soundDiag.pending = list.length + '件: ' + list.map(function (n) {
-          var at = n && n.schedule && n.schedule.at ? new Date(n.schedule.at) : null;
-          var when = (at && !isNaN(at.getTime())) ? hhmmss(at) : '時刻不明';
-          return '#' + n.id + ' ' + when;
-        }).join(' / ');
+        soundDiag.pending = describePending(list);
+        return { ok: true, list: list };
       })
-      .catch(function (e) { soundDiag.pending = 'NG: ' + errText(e); });
+      .catch(function (e) {
+        var why = errText(e);
+        soundDiag.pending = 'NG: ' + why;
+        return { ok: false, list: [], why: why };
+      });
+  }
+  function refreshPendingDiag() {
+    return readPending().then(function () { /* 表示だけ更新する */ });
   }
 
   /* 「OSが通知を配信したのか、そもそも配信していないのか」を分けるための欄。
@@ -2676,26 +2695,108 @@
     return notif;
   }
 
+  /* ---- 「予約できた」はOSに聞くまで分からない ----
+     Capacitor の schedule() は UNUserNotificationCenter.add() の完了を待たずに resolve する。
+     node_modules/@capacitor/local-notifications/.../LocalNotificationsPlugin.swift の schedule は
+
+         center.add(request) { error in if let e = error { call.reject(...) } }   // 非同期
+         ids.append(...)
+         call.resolve(["notifications": ret])                                     // ← 先に返る
+
+     という並びで、add のコールバックの外で resolve している。
+     しかも add が失敗したときの call.reject は「resolve 済みの呼び出し」への空振りなので、
+     OSが予約を突き返してもJS側は成功したようにしか見えない。
+     つまり resolve は「注文票を渡した」までで、「OSが受理した」ではない。
+     直後に getPending() を読むのも add 完了前を引く可能性がある。
+     そこで resolve は「受付」とだけ書き、getPending() にそのidが現れるまで
+     少し待って聞き直し、確認が取れてはじめて OK と書く。 */
+  var PENDING_CONFIRM_TRIES = 6;
+  var PENDING_CONFIRM_WAIT_MS = 400;
+
+  function laterMs(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  /* 指定idがOSの予約一覧に現れるまで聞き直す。
+     found=入っている / missing=入っていない / fired=もう時刻を過ぎた（消えていて当然）
+     / error=OSに聞けなかった、の4つを区別して返す。 */
+  function confirmScheduled(id, atMs, tries) {
+    return readPending().then(function (res) {
+      if (!res.ok) return { state: 'error', why: res.why };
+      for (var i = 0; i < res.list.length; i++) {
+        if (res.list[i] && String(res.list[i].id) === String(id)) {
+          return { state: 'found', notif: res.list[i] };
+        }
+      }
+      // 確認している間に予定時刻を過ぎたなら、消えているのが正しい姿
+      if (atMs <= Date.now()) return { state: 'fired' };
+      if (tries <= 1) return { state: 'missing' };
+      return laterMs(PENDING_CONFIRM_WAIT_MS).then(function () {
+        return confirmScheduled(id, atMs, tries - 1);
+      });
+    });
+  }
+
+  /* 診断欄をまるごと描き直すとOSへの問い合わせが連鎖するので、
+     予約の進み具合だけを書き換えたいときはこちらを使う。
+     予約の確認で OSに聞いた結果も一緒に届いているので、その欄も合わせて直す。 */
+  function renderSchedDiag() {
+    try {
+      var el = $('#diagSched');
+      if (el) el.textContent = soundDiag.sched;
+      var pend = $('#diagPending');
+      if (pend) pend.textContent = soundDiag.pending;
+    } catch (e) { /* 表示できないだけなので握りつぶす */ }
+  }
+
+  /* ---- 予約欄は「いちばん新しい書き手」だけが書ける ----
+     予約は「まず出す→許可が取れたら出し直す」の2段構えで、さらに各段が
+     OSへの確認を数百ミリ秒かけて行う。素朴に書くと、先に始まった確認が
+     あとから返ってきて、より新しく確定した結果（例：「通知が許可されていない」）を
+     上書きしてしまう。番号を配って、追い越された書き手は黙るようにする。 */
+  var schedSeq = 0;
+  function claimSched() { return ++schedSeq; }
+  function writeSched(token, text) {
+    if (token !== schedSeq) return;   // もっと新しい書き手がいるので何もしない
+    soundDiag.sched = text;
+    renderSchedDiag();
+  }
+
   /* 実際にOSへ予約を投げる。ここは何も待たずに呼べること自体が要件なので、
      同期例外も含めて必ず soundDiag.sched に残し、外へは投げない。 */
   function pushNotif(ln, id, body, atMs) {
     var at = new Date(atMs);
     var notif = buildNotif(id, body, at);
-    soundDiag.sched = '予約中… ' + hhmmss(at);
+    var label = hhmmss(at) + ' / ' + (notif.sound || '音なし');
+    var token = claimSched();
+    writeSched(token, '予約中… ' + hhmmss(at));
     try {
       Promise.resolve()
         .then(function () { return ln.schedule({ notifications: [notif] }); })
         .then(function () {
-          soundDiag.sched = 'OK ' + hhmmss(at) + ' / ' + (notif.sound || '音なし');
-          return refreshPendingDiag();
+          // ここではまだ「渡した」だけ。OSが受け取ったかは次で確かめる
+          writeSched(token, '受付 ' + label + '（OSに確認中…）');
+          return confirmScheduled(id, atMs, PENDING_CONFIRM_TRIES);
+        })
+        .then(function (res) {
+          if (res.state === 'found') {
+            writeSched(token, 'OK ' + label + '（OS確認済み）');
+          } else if (res.state === 'fired') {
+            writeSched(token, '受付 ' + label + '（予定時刻を過ぎたため確認できず）');
+          } else if (res.state === 'error') {
+            writeSched(token, '受付 ' + label + '（確認できず: ' + res.why + '）');
+            noteAppError('通知の予約確認', res.why);
+          } else {
+            writeSched(token, 'NG: OSに予約が入っていない ' + label);
+            noteAppError('通知の予約', 'schedule後もOSの予約一覧に現れない（OSが受理しなかった）');
+          }
         })
         .catch(function (e) {
-          soundDiag.sched = 'NG: ' + errText(e);
+          writeSched(token, 'NG: ' + errText(e));
           noteAppError('通知の予約', e);
-        })
-        .then(renderSoundDiag);
+        });
     } catch (e) {
-      soundDiag.sched = 'NG: ' + errText(e);
+      writeSched(token, 'NG: ' + errText(e));
       noteAppError('通知の予約', e);
     }
   }
@@ -2712,11 +2813,11 @@
      予約前に cancel していたのもやめた（cancel の完了を待っていなかったため、
      順序が入れ替わると予約したばかりの通知を自分で消す可能性があった）。 */
   function scheduleTimerNotification(endAtMs) {
-    if (!isNativeApp()) { soundDiag.sched = '—（ブラウザ版）'; return; }
+    if (!isNativeApp()) { writeSched(claimSched(), '—（ブラウザ版）'); return; }
     var ln = nativePlugin('LocalNotifications');
-    if (!ln) { soundDiag.sched = 'NG: 通知プラグインが読み込まれていない'; return; }
-    if (!timerSettings.notifyOn) { soundDiag.sched = '—（システム通知がOFF）'; return; }
-    if (endAtMs <= Date.now()) { soundDiag.sched = 'NG: 終了時刻が過去'; return; }
+    if (!ln) { writeSched(claimSched(), 'NG: 通知プラグインが読み込まれていない'); return; }
+    if (!timerSettings.notifyOn) { writeSched(claimSched(), '—（システム通知がOFF）'); return; }
+    if (endAtMs <= Date.now()) { writeSched(claimSched(), 'NG: 終了時刻が過去'); return; }
 
     // ① 何も待たずに予約する。この1行がアプリを閉じられても残る
     pushNotif(ln, TIMER_NOTIF_ID, '休憩終了！ 次のセットへ', endAtMs);
@@ -2725,7 +2826,9 @@
     //    その間はアプリが前面なのでJSは止まらない。取れたら同じidで出し直す
     withTimeout(ensureNotifPermission(), PERM_WAIT_MS, null)
       .then(function (granted) {
-        if (granted === false) { soundDiag.sched = 'NG: 通知が許可されていない'; return; }
+        /* 許可が無いと分かった時点で、進行中の予約確認より新しい確定情報になる。
+           番号を取り直して、あとから返る確認結果に上書きされないようにする。 */
+        if (granted === false) { writeSched(claimSched(), 'NG: 通知が許可されていない'); return; }
         // 待っている間にタイマーが止まった・時間が変わったなら、その回の予約はもう関係ない
         if (!timer.running || timer.paused || timer.finished || timer.endAt !== endAtMs) return;
         // 終了直前だと出し直しが「過去の時刻」として弾かれ、成功済みの表示を上書きしてしまう
@@ -3388,8 +3491,27 @@
   var soundDiag = {
     play: '未実行', notif: '未実行', session: '未実行',
     sched: '未実行', pending: '未確認', delivered: '未確認',
-    files: '未確認', ios: '未確認', perm: '未確認'
+    files: '未確認', ios: '未確認', perm: '未確認', foreground: '未確認'
   };
+
+  /* ---- 前面にいるときの通知の出方 ----
+     capacitor.config.json の LocalNotifications.presentationOptions と対になる写し。
+     この設定値はJSからは読めないので、ここに同じ内容を置いて診断に出す。
+     配列を明示すると、そこに書いていないものは Capacitor 側で明示的に抑止される
+     （既定は badge/sound/banner/list の4つ）。
+     "sound" をあえて外しているのは、アプリが前面にいるときはアプリ内アラームが鳴っており、
+     通知音と重なって二重に聞こえるのを避けるため。意図した無音であって不具合ではない。
+     ただし診断画面がぜんぶ正常なのに前面で音がしないと故障に見えるので、こうして明記する。
+     ★片方だけ書き換えると診断が嘘になる。変えるときは capacitor.config.json と必ず両方直すこと。 */
+  var FOREGROUND_PRESENTATION = ['banner', 'list', 'badge'];
+  function describeForegroundPresentation() {
+    if (!isNativeApp()) return '—（ブラウザ版）';
+    var names = { banner: 'バナー', list: '通知センター', badge: 'バッジ', sound: '音' };
+    var shown = FOREGROUND_PRESENTATION.map(function (k) { return names[k] || k; }).join('・');
+    var hasSound = FOREGROUND_PRESENTATION.indexOf('sound') >= 0;
+    return (shown || '何も出さない') + ' / 通知音' +
+      (hasSound ? 'オン' : 'オフ（アプリ内アラームと二重に鳴らないようアプリ側で切っています）');
+  }
   var SILENT_WAV_URL = (function () {
     // 1chモノラル・8kHz・16bit・約0.05秒(400サンプル)の無音WAV。ArrayBufferは既定でゼロ埋めなのでそのまま無音になる
     var sampleRate = 8000, samples = 400, dataSize = samples * 2;
@@ -3905,17 +4027,26 @@
   /* OSへの問い合わせが返ってこないと、欄が「確認中…」のまま固まって
      何が起きているのか実機から読み取れない。時間切れをはっきり書き出す。 */
   var DIAG_WAIT_MS = 4000;
-  function fillDiag(sel, work, get) {
+  /* key は soundDiag のどの欄を担当するか。
+     失敗や時間切れのときに前回の値を残すと、たとえば許可が取れなくなった回でも
+     古い「granted」がそのまま出て、診断そのものが嘘をつく。
+     ここで必ず失敗として上書きしてから表示する。 */
+  function fillDiag(sel, key, work) {
     var el = $(sel);
     if (!el) return Promise.resolve();
     el.textContent = '確認中…';
-    var answered = false;
+    var done = false;
     var p = Promise.resolve()
       .then(work)
-      .then(function () { answered = true; })
-      .catch(function (e) { answered = true; noteAppError('診断', e); });
+      .then(function () { done = true; })
+      .catch(function (e) {
+        done = true;
+        soundDiag[key] = 'NG: ' + errText(e);
+        noteAppError('診断', e);
+      });
     return withTimeout(p, DIAG_WAIT_MS, null).then(function () {
-      el.textContent = answered ? get() : '確認が返ってきません（時間切れ）';
+      if (!done) soundDiag[key] = '確認が返ってきません（時間切れ）';
+      el.textContent = soundDiag[key];
     });
   }
 
@@ -3928,24 +4059,28 @@
       $('#diagNotif').textContent = soundDiag.notif;
       $('#diagSession').textContent = soundDiag.session;
       $('#diagSched').textContent = soundDiag.sched;
+      // OSに聞く必要がない（アプリ側の設定で決まる）ので、その場で組み立てて出す
+      soundDiag.foreground = describeForegroundPresentation();
+      $('#diagForeground').textContent = soundDiag.foreground;
       $('#diagErr').textContent = lastAppError || 'なし';
     } catch (e) { noteAppError('診断表示', e); }
 
     var ln = nativePlugin('LocalNotifications');
     if (ln) {
-      fillDiag('#diagPerm', function () {
+      fillDiag('#diagPerm', 'perm', function () {
         return ln.checkPermissions().then(function (r) { soundDiag.perm = (r && r.display) || '不明'; });
-      }, function () { return soundDiag.perm; });
+      });
     } else {
-      $('#diagPerm').textContent = 'NG: プラグイン未登録';
+      soundDiag.perm = 'NG: プラグイン未登録';
+      $('#diagPerm').textContent = soundDiag.perm;
     }
     // OSに聞かないと分からないものは、画面を開くたびに取り直す
-    fillDiag('#diagPending', refreshPendingDiag, function () { return soundDiag.pending; });
-    fillDiag('#diagDelivered', refreshDeliveredDiag, function () { return soundDiag.delivered; });
-    fillDiag('#diagIos', refreshIosNotifDiag, function () { return soundDiag.ios; });
-    fillDiag('#diagFiles', function () {
+    fillDiag('#diagPending', 'pending', refreshPendingDiag);
+    fillDiag('#diagDelivered', 'delivered', refreshDeliveredDiag);
+    fillDiag('#diagIos', 'ios', refreshIosNotifDiag);
+    fillDiag('#diagFiles', 'files', function () {
       return readSoundFiles().then(function (r) { soundDiag.files = describeSoundFiles(r); });
-    }, function () { return soundDiag.files; });
+    });
   }
   var timerSettingsBound = false;
   function bindTimerSettingsOnce() {
