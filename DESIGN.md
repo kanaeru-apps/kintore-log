@@ -2,7 +2,7 @@
 
 ## 現在地（2026-08-18 時点 / 最初にここを読む）
 
-**バージョン**：`v0.13.11` ／ `sw.js` の `CACHE` は `kintore-v55`
+**バージョン**：`v0.13.12` ／ `sw.js` の `CACHE` は `kintore-v56`
 
 **いま追っている問題**：App Store提出前の実機検証。**通知が1件も配信されない**。
 
@@ -46,9 +46,14 @@ JSの通知データへ `badge: 1` を追加し、`@capacitor/local-notification
 `visibilitychange` が発火しない場合もバッジを残さない。
 
 **v0.13.11 の追加**：設定画面の「サポート」と「プライバシー」の間に「応援」を追加した。
-「レビューで応援する」を押すと、Apple ID `1049236802` のApp Storeレビュー入力画面を
+「レビューで応援する」を押すと、Apple ID `6800222286` のApp Storeレビュー入力画面を
 `action=write-review` 付きの商品URLで開く。iOS版は自前プラグインからApp Storeを開き、
 PWA版は新しいタブで同じページを開く。
+
+**v0.13.12 の修正**：レビューリンクの商品IDを `6800222286` へ訂正した。
+以前記載していた `1049236802` はApp Store Connectのアカウント表示に含まれる番号で、
+筋トレLogの商品IDではなかった。App Store Connectの筋トレLog詳細URL
+`/apps/6800222286/distribution` で実際の商品IDを確認した。
 
 **v0.13.4 実機の結果（2026-08-17）**：JS もネイティブプラグインも生きている
 （アプリ内アラーム音・振動が動く＝ `AlarmAudioPlugin` は登録されている）のに、
@@ -534,7 +539,7 @@ URL入力欄が消えて**「ログイン」1ボタン**になるため、「上
 7. ✅ プライバシーポリシー・サポートページを作成（`privacy-policy.html` / `support.html`）
 8. ✅ `codemagic.yaml` を作成（無音カメラの構成を流用＋`node build-ios.js` を追加）
 9. ✅ `npx cap add ios` でiOSプロジェクトを生成し、Info.plist・端末対応・アイコンを調整（7-9）
-10. ✅ アプリ名を決定 → App Store Connect でアプリを作成（`筋トレLog` / Apple ID `1049236802`）
+10. ✅ アプリ名を決定 → App Store Connect でアプリを作成（`筋トレLog` / Apple ID `6800222286`）
 11. ✅ スクリーンショットを作成（6.9インチ・6.5インチ／7-13）
 12. ✅ Codemagicにリポジトリを接続してビルド（2026-08-11・Index 4 で成功／7-14） → **TestFlightで実機検証が残**（**特にタイマーの画面ロック中通知**）
 13. App Store Connect でメタデータ入力・App Privacy申告・審査提出
@@ -634,7 +639,7 @@ Codemagic側で必要な準備：リポジトリ接続、`Settings > Integration
 
 ### 7-12. App Store Connect 入力内容（2026-08-11 確定）
 
-App Store Connect のアプリ作成は完了済み（Apple ID `1049236802`）。以下は各入力欄にそのまま入れる確定文言。**書いてある機能はすべてコードで実装を確認済み**（存在しない機能を書くと審査で問題になるため、有酸素の記録項目は `cardioEntryHtml`（app.js 1207行）の実装を、CSVインポートは `#importCsvBtn`（index.html 242行）を確認した）。
+App Store Connect のアプリ作成は完了済み（Apple ID `6800222286`）。以下は各入力欄にそのまま入れる確定文言。**書いてある機能はすべてコードで実装を確認済み**（存在しない機能を書くと審査で問題になるため、有酸素の記録項目は `cardioEntryHtml`（app.js 1207行）の実装を、CSVインポートは `#importCsvBtn`（index.html 242行）を確認した）。
 
 **「アプリ情報」ページ**
 
@@ -1846,7 +1851,7 @@ el.getClientRects().length > 0   // 実際に描画されているか
 2. **Phase 7：App Store公開** → **コード側は完了（2026-08-10）。上記「Phase 7」を参照**
    - 方針確定：**v1.0＝クラウド同期なし**（iCloudバックアップ＋ローカル通知）で確実に審査を通す → **v1.1＝Googleログイン同期**を追加。PWA版は自分専用として現状維持
    - 完了：実装・自動検証・プライバシー/サポートページ・`codemagic.yaml`・Xcodeプロジェクト・アイコン（7-8の1〜9）
-   - 完了：アプリ名決定＋App Store Connectでアプリ作成（`筋トレLog` / Apple ID `1049236802`）、スクリーンショット6枚×2サイズ（7-13）、**Codemagicビルド成功＋App Store Connectへアップロード**（2026-08-11 / Index 4 / 7-14）
+   - 完了：アプリ名決定＋App Store Connectでアプリ作成（`筋トレLog` / Apple ID `6800222286`）、スクリーンショット6枚×2サイズ（7-13）、**Codemagicビルド成功＋App Store Connectへアップロード**（2026-08-11 / Index 4 / 7-14）
    - 完了：TestFlight配信（内部テスト「社内テスト」にテスター招待済み。1.0(4)/1.0(5) が配信可能）
    - **次にやること**
      1. **Codemagicで v0.13.2（Phase 9.6の通知音）を再ビルド → TestFlightで実機検証**

@@ -3040,7 +3040,7 @@
   function bindAppReview() {
     var btn = $('#reviewAppBtn');
     if (!btn) return;
-    var reviewUrl = 'https://apps.apple.com/app/id1049236802?action=write-review';
+    var reviewUrl = 'https://apps.apple.com/app/id6800222286?action=write-review';
     btn.addEventListener('click', function () {
       var alarm = nativePlugin('AlarmAudio');
       if (isNativeApp() && alarm && alarm.openReviewPage) {
