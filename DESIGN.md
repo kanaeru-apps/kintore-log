@@ -1,8 +1,8 @@
 # DESIGN.md — ツール_筋トレ記録
 
-## 現在地（2026-08-17 時点 / 最初にここを読む）
+## 現在地（2026-08-18 時点 / 最初にここを読む）
 
-**バージョン**：`v0.13.10` ／ `sw.js` の `CACHE` は `kintore-v54`
+**バージョン**：`v0.13.11` ／ `sw.js` の `CACHE` は `kintore-v55`
 
 **いま追っている問題**：App Store提出前の実機検証。**通知が1件も配信されない**。
 
@@ -44,6 +44,11 @@ JSの通知データへ `badge: 1` を追加し、`@capacitor/local-notification
 それ以前は `UIApplication.applicationIconBadgeNumber` を使い、Web Badging APIは予備経路とする。
 通常の初期化時にも `clearBadge()` を呼び、通知からのコールド起動で
 `visibilitychange` が発火しない場合もバッジを残さない。
+
+**v0.13.11 の追加**：設定画面の「サポート」と「プライバシー」の間に「応援」を追加した。
+「レビューで応援する」を押すと、Apple ID `1049236802` のApp Storeレビュー入力画面を
+`action=write-review` 付きの商品URLで開く。iOS版は自前プラグインからApp Storeを開き、
+PWA版は新しいタブで同じページを開く。
 
 **v0.13.4 実機の結果（2026-08-17）**：JS もネイティブプラグインも生きている
 （アプリ内アラーム音・振動が動く＝ `AlarmAudioPlugin` は登録されている）のに、

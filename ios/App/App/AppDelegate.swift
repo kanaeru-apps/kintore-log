@@ -102,6 +102,7 @@ public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "notificationSettings", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "vibrate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openSettings", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openReviewPage", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setBadge", returnType: CAPPluginReturnPromise)
     ]
 
@@ -136,6 +137,23 @@ public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let url = URL(string: UIApplication.openSettingsURLString),
                   UIApplication.shared.canOpenURL(url) else {
                 call.resolve(["opened": false])
+                return
+            }
+            UIApplication.shared.open(url, options: [:]) { ok in
+                call.resolve(["opened": ok])
+            }
+        }
+    }
+
+    /// App Storeの商品ページにあるレビュー入力画面を、アプリ外で開く。
+    /// URLはJS側でApple IDと action=write-review を含めて組み立てて渡す。
+    @objc public func openReviewPage(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard let value = call.getString("url"),
+                  let url = URL(string: value),
+                  url.scheme == "https",
+                  url.host == "apps.apple.com" else {
+                call.reject("Invalid App Store review URL")
                 return
             }
             UIApplication.shared.open(url, options: [:]) { ok in

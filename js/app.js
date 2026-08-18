@@ -3033,6 +3033,31 @@
     };
   }
 
+  /* App Storeの商品ページにあるレビュー入力画面を開く。
+     ボタン操作には表示回数制限のあるレビュー依頼APIを使わず、Appleが案内している
+     action=write-review 付きの常設リンクを使う。ネイティブ版は外部のApp Storeで開き、
+     ブラウザ版は通常の新規タブへフォールバックする。 */
+  function bindAppReview() {
+    var btn = $('#reviewAppBtn');
+    if (!btn) return;
+    var reviewUrl = 'https://apps.apple.com/app/id1049236802?action=write-review';
+    btn.addEventListener('click', function () {
+      var alarm = nativePlugin('AlarmAudio');
+      if (isNativeApp() && alarm && alarm.openReviewPage) {
+        alarm.openReviewPage({ url: reviewUrl }).then(function (result) {
+          if (!result || result.opened !== false) return;
+          toast('App Storeを開けませんでした');
+        }).catch(function (e) {
+          noteAppError('レビュー画面', e);
+          toast('App Storeを開けませんでした');
+        });
+        return;
+      }
+      var opened = window.open(reviewUrl, '_blank', 'noopener,noreferrer');
+      if (!opened) window.location.href = reviewUrl;
+    });
+  }
+
   /* @sync:start */
   /* 記録が空の端末からの復元導線（記録タブの空状態から。隠し機能の解除状態と独立して使える） */
   function promptCloudRestore() {
@@ -4265,6 +4290,7 @@
   bindHistory();
   bindSettings();
   bindFeedback();
+  bindAppReview();
   bindExInfo();
   bindDrum();
   bindCtime();
