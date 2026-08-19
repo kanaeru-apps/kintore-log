@@ -29,6 +29,65 @@
     noteAppError('未処理のPromise', ev);
   });
 
+  /* ---- ほかのアプリの音を止めない（オーディオセッションの種別） ----
+     iOSのSafari／ホーム画面アプリは、既定（navigator.audioSession.type = 'auto'）のままだと
+     WebKitが音の使われ方を見てセッションの種別を決める。アラームのような単発の音でも
+     'playback'（ほかの音を無期限に止める種別）へ格上げされるため、YouTubeやミュージックを
+     聞きながらこのアプリを開くと相手の再生が止まり、アラームが鳴り終わっても戻らない。
+
+     そこで普段は 'ambient'（ほかのアプリの音と混ぜて鳴らす）に固定し、
+     アラームを鳴らす瞬間だけ 'transient'（相手の音の上に重ねる。相手を止めず音量を下げるだけ）
+     へ切り替えて、鳴り終わったら 'ambient' へ戻す。
+
+     ★トレードオフ：'ambient'/'transient' は消音スイッチ（サイレントモード）に従うため、
+     消音のままだとブラウザ版のアラームは鳴らない。Webから選べる種別では
+     「ほかのアプリを止めない」と「消音でも鳴る」は両立できない（消音を無視できるのは
+     ほかを止める 'playback' だけ）。ネイティブ版は AVAudioSession を
+     .playback + .mixWithOthers にして両立させている（AppDelegate.swift）ので、
+     そちらの設定を壊さないようネイティブ版ではここは何もしない。
+
+     この設定は「開いた瞬間」に効いている必要がある。何か鳴らしてから変えたのでは、
+     その1回目で相手の再生が止まってしまうため、アプリの初期化を待たずここで適用する。 */
+  var AUDIO_SESSION_IDLE = 'ambient';    // 普段：ほかのアプリの音と混ざる
+  var AUDIO_SESSION_ALARM = 'transient'; // アラーム中：ほかのアプリの音の上に重ねる
+  function setAudioSessionType(type) {
+    if (isNativeApp()) return false;               // ネイティブ版はAVAudioSessionが本体
+    try {
+      if (!navigator.audioSession) return false;   // iOS16.3以前など未対応の環境
+      navigator.audioSession.type = type;
+      return true;
+    } catch (e) { return false; }
+  }
+  /* 「いちばん新しいアラーム」だけがセッションを戻せるようにする通し番号。
+     試聴を連打したときなど、先に始まった再生の終了通知が遅れて届いて、
+     いま鳴っているアラームのセッションを勝手に戻してしまうのを防ぐ（writeDiag と同じ考え方）。 */
+  var alarmSessionToken = 0;
+  function beginAlarmSession() {
+    alarmSessionToken++;
+    setAudioSessionType(AUDIO_SESSION_ALARM);
+    return alarmSessionToken;
+  }
+  /* token なしで呼ぶと無条件に戻す（停止操作から呼ぶ場合） */
+  function endAlarmSession(token) {
+    if (token && token !== alarmSessionToken) return;
+    setAudioSessionType(AUDIO_SESSION_IDLE);
+  }
+  /* いま何が効いているかを設定画面の診断に出す（ブラウザ版用） */
+  function describeWebAudioSession() {
+    try {
+      if (!navigator.audioSession) return '—（この端末は種別を指定できません）';
+      var t = navigator.audioSession.type;
+      var names = {
+        ambient: 'ambient（ほかのアプリの音を止めない／消音スイッチに従う）',
+        transient: 'transient（アラーム再生中）',
+        playback: 'playback（ほかのアプリの音を止める）',
+        auto: 'auto（ブラウザ任せ）'
+      };
+      return names[t] || String(t);
+    } catch (e) { return '—（取得できません）'; }
+  }
+  setAudioSessionType(AUDIO_SESSION_IDLE);
+
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
   var PART_CLASS = { '胸': 'chest', '背中': 'back', '脚': 'leg', '肩': 'shoulder', '腕': 'arm', '腹': 'core', '有酸素': 'cardio', 'その他': 'etc' };
   var CARDIO_PART = '有酸素';
@@ -2283,7 +2342,9 @@
      プラグインが無い／古いビルドでは reject されるが、AppDelegate 側が起動時に
      .playback を張っているので「鳴る」状態が既定になる（設定が効かないだけで無音にはならない）。 */
   function applySilentModeSetting() {
-    if (!isNativeApp()) { soundDiag.session = '—（ブラウザ版）'; return Promise.resolve(false); }
+    /* ブラウザ版に AVAudioSession は無いが、代わりに navigator.audioSession の種別を
+       握っている。何が効いているかを診断欄と同じ変数に残しておく。 */
+    if (!isNativeApp()) { soundDiag.session = describeWebAudioSession(); return Promise.resolve(false); }
     var pl = nativePlugin('AlarmAudio');
     if (!pl) { soundDiag.session = 'NG: プラグイン未登録'; return Promise.resolve(false); }
     return pl.setIgnoreSilentMode({ value: !!timerSettings.ignoreSilent })
@@ -3463,7 +3524,7 @@
     total: 0, endAt: 0, remaining: 0,
     running: false, paused: false, finished: false,
     tick: null, wakeLock: null, audioCtx: null, beepNodes: [],
-    audioElUnlocked: false, previewStop: null, vibrateTimer: null,
+    audioElUnlocked: false, previewStop: null, vibrateTimer: null, sessionGuard: null,
     customMin: 3,
     twBuilt: false, twBound: false, twSel: -1
   };
@@ -3558,6 +3619,10 @@
      即座にアンロックしてから、実ファイルを裏で読み込ませる。 ---- */
   function alarmFileName(key) { return key + '.wav'; }
   function alarmSrc(key) { return 'sounds/' + alarmFileName(key); }
+  /* 同梱WAVでいちばん長いもの（bell/chime）が6.0秒。
+     「鳴り終わったはずなのに終了通知が来ない」ときの戻し時刻の計算に使う。
+     音源を作り直して長くしたら、ここも合わせて伸ばすこと。 */
+  var ALARM_MAX_SEC = 7;
 
   /* 「音が鳴らない」と言われたときに設定画面で状態を見せるための記録（診断表示用）。
      sched / pending は「アプリを閉じているときの通知」が出なかったときに、
@@ -3632,13 +3697,31 @@
     for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
     return 'data:audio/wav;base64,' + btoa(bin);
   })();
+  /* AudioContext は running でいるあいだオーディオセッションを掴み続ける。
+     この経路は「同梱WAVが鳴らせなかったときだけ」の控えなので、
+     使っていないときは眠らせておき、ほかのアプリの音に干渉させない。 */
+  function sleepAudioCtx() {
+    var ctx = timer.audioCtx;
+    if (!ctx || ctx.state !== 'running') return;
+    if (timer.beepNodes && timer.beepNodes.length) return; // 控えで鳴らしている最中は触らない
+    try { ctx.suspend(); } catch (e) { /* noop */ }
+  }
   function unlockAudio() {
     try {
       if (!timer.audioCtx) {
         var AC = window.AudioContext || window.webkitAudioContext;
         if (AC) timer.audioCtx = new AC();
       }
-      if (timer.audioCtx && timer.audioCtx.state === 'suspended') timer.audioCtx.resume();
+      /* iOSは「ユーザー操作の中で一度 running にした AudioContext」でないと
+         あとから resume できないため、ここで一度起こしておく。
+         ただし running のまま放置するとオーディオセッションを掴み続け、
+         ほかのアプリの音に干渉するので、起きたことを確かめたらすぐ眠らせる
+         （フォールバック再生の直前に起こし直す）。 */
+      if (timer.audioCtx && timer.audioCtx.state === 'suspended') {
+        var r = timer.audioCtx.resume();
+        if (r && r.then) r.then(sleepAudioCtx).catch(function () { /* noop */ });
+        else sleepAudioCtx();
+      }
     } catch (e) { /* noop */ }
     if (!timer.audioElUnlocked) {
       try {
@@ -3681,7 +3764,26 @@
   function playAlarmFile(key, stopAfterSec) {
     var el = setAlarmSource(key);
     var full = !stopAfterSec;
-    if (!el) { soundDiag.play = 'NG: <audio>要素が無い'; playViaAudioContextFallback(key, full); return; }
+    /* 鳴らす直前にセッションを transient へ上げる（ほかのアプリの音の上に重ねる）。
+       鳴り終わったら ambient へ戻す＝相手の音量が下がったままにならない。 */
+    var sessionToken = beginAlarmSession();
+    /* 想定より長く transient のままになると、相手の音が小さいままになる。
+       ended が来なかった場合の保険として、必ず戻す時刻を切っておく
+       （同梱WAVはいちばん長いものでも約5秒） */
+    clearAlarmSessionGuard();
+    timer.sessionGuard = setTimeout(function () {
+      timer.sessionGuard = null;
+      endAlarmSession(sessionToken);
+      sleepAudioCtx();
+    }, (stopAfterSec > 0 ? stopAfterSec : ALARM_MAX_SEC) * 1000 + 1000);
+    if (!el) {
+      soundDiag.play = 'NG: <audio>要素が無い';
+      playViaAudioContextFallback(key, full);
+      return;
+    }
+    /* 再生が自然に終わったらそこで戻す。src を差し替えても要素は同じなので
+       onended（上書き代入）にしておけば、リスナが積み重なることはない。 */
+    el.onended = function () { endAlarmSession(sessionToken); };
     var fallback = function (why) {
       soundDiag.play = 'NG: ' + why;
       playViaAudioContextFallback(key, full);
@@ -3702,6 +3804,9 @@
       clearPreviewStop();
       timer.previewStop = setTimeout(function () { timer.previewStop = null; stopBeep(); }, stopAfterSec * 1000);
     }
+  }
+  function clearAlarmSessionGuard() {
+    if (timer.sessionGuard) { clearTimeout(timer.sessionGuard); timer.sessionGuard = null; }
   }
   function clearPreviewStop() {
     if (timer.previewStop) { clearTimeout(timer.previewStop); timer.previewStop = null; }
@@ -3757,7 +3862,15 @@
     try {
       var ctx = timer.audioCtx;
       if (!ctx) return;
-      if (ctx.state === 'suspended') ctx.resume();
+      if (ctx.state === 'suspended') {
+        /* 眠らせてあるので起こす。起き切る前に積むと最初の音が欠けることがあるため、
+           完了を待ってからスケジュールする（resume を返さない古い実装ではその場で積む）。 */
+        var r = ctx.resume();
+        if (r && r.then) {
+          r.then(function () { schedulePattern(ctx, key, full); }).catch(function () { /* noop */ });
+          return;
+        }
+      }
       schedulePattern(ctx, key, full);
     } catch (e) { /* noop */ }
   }
@@ -3775,12 +3888,17 @@
   }
   function stopBeep() {
     clearPreviewStop();
+    clearAlarmSessionGuard();
     (timer.beepNodes || []).forEach(function (o) { try { o.stop(); o.disconnect(); } catch (e) { /* noop */ } });
     timer.beepNodes = [];
     try {
       var el = $('#timerAlarmAudio');
       if (el) { el.pause(); if (el.currentTime) el.currentTime = 0; }
     } catch (e) { /* noop */ }
+    /* 鳴らすのをやめた以上、ほかのアプリの音を抑えたままにしない。
+       止めるのは常に「いま鳴っている音」なので、通し番号は見ずに無条件で戻す。 */
+    endAlarmSession();
+    sleepAudioCtx();
   }
   /* バイブ（設定でオフなら振動しない）。
      navigator.vibrate は iOS の WKWebView に存在せず、これまでiPhoneでは一度も振動していなかった。
