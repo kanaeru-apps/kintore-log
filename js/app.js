@@ -48,8 +48,13 @@
 
      この設定は「開いた瞬間」に効いている必要がある。何か鳴らしてから変えたのでは、
      その1回目で相手の再生が止まってしまうため、アプリの初期化を待たずここで適用する。 */
-  var AUDIO_SESSION_IDLE = 'ambient';    // 普段：ほかのアプリの音と混ざる
-  var AUDIO_SESSION_ALARM = 'transient'; // アラーム中：ほかのアプリの音の上に重ねる
+  var AUDIO_SESSION_IDLE = 'ambient';         // 普段：ほかのアプリの音と混ざる
+  var AUDIO_SESSION_ALARM = 'transient';     // アラーム中（消音スイッチに従う）：ほかの音の上に重ねる
+  var AUDIO_SESSION_ALARM_LOUD = 'playback'; // アラーム中（消音スイッチを無視）：ほかの音は止まる
+  /* この端末で種別を選べるか。ブラウザ版で消音トグルを出すかの判断に使う。 */
+  function canPickAudioSession() {
+    try { return !!navigator.audioSession; } catch (e) { return false; }
+  }
   function setAudioSessionType(type) {
     if (isNativeApp()) return false;               // ネイティブ版はAVAudioSessionが本体
     try {
@@ -62,9 +67,21 @@
      試聴を連打したときなど、先に始まった再生の終了通知が遅れて届いて、
      いま鳴っているアラームのセッションを勝手に戻してしまうのを防ぐ（writeDiag と同じ考え方）。 */
   var alarmSessionToken = 0;
+  /* アラームの間だけ使う種別を、設定「消音モードでも鳴らす」から決める。
+     消音スイッチを無視できるのは playback だけで、これは同時に
+     「ほかのアプリの音を止める」種別でもある。Webから選べる範囲では
+     「消音でも鳴る」と「ほかを止めない」は両立しないので、どちらを取るかは
+     ユーザーに選んでもらう（ネイティブ版は .playback + .mixWithOthers で両立するため、
+     そもそもここは呼ばれても何もしない）。
+     鳴らす瞬間の設定を読む：設定を変えたあと、次のアラームから効く。 */
+  function alarmSessionType() {
+    var loud = false;
+    try { loud = !!(timerSettings && timerSettings.ignoreSilent); } catch (e) { loud = false; }
+    return loud ? AUDIO_SESSION_ALARM_LOUD : AUDIO_SESSION_ALARM;
+  }
   function beginAlarmSession() {
     alarmSessionToken++;
-    setAudioSessionType(AUDIO_SESSION_ALARM);
+    setAudioSessionType(alarmSessionType());
     return alarmSessionToken;
   }
   /* token なしで呼ぶと無条件に戻す（停止操作から呼ぶ場合） */
@@ -76,14 +93,11 @@
   function describeWebAudioSession() {
     try {
       if (!navigator.audioSession) return '—（この端末は種別を指定できません）';
-      var t = navigator.audioSession.type;
-      var names = {
-        ambient: 'ambient（ほかのアプリの音を止めない／消音スイッチに従う）',
-        transient: 'transient（アラーム再生中）',
-        playback: 'playback（ほかのアプリの音を止める）',
-        auto: 'auto（ブラウザ任せ）'
-      };
-      return names[t] || String(t);
+      var now = navigator.audioSession.type;
+      var next = alarmSessionType() === AUDIO_SESSION_ALARM_LOUD
+        ? 'アラームは playback（消音でも鳴る／ほかのアプリの音は止まる）'
+        : 'アラームは transient（ほかのアプリの音を止めない／消音中は鳴らない）';
+      return '現在 ' + now + ' ・ ' + next;
     } catch (e) { return '—（取得できません）'; }
   }
   setAudioSessionType(AUDIO_SESSION_IDLE);
@@ -4260,8 +4274,15 @@
     $('#toggleVibrateOn').checked = timerSettings.vibrateOn;
     $('#toggleNotifyOn').checked = timerSettings.notifyOn;
     $('#toggleIgnoreSilent').checked = timerSettings.ignoreSilent;
-    // 消音モードの制御と診断表示はネイティブ版だけの話なので、ブラウザ版では出さない
-    $('#rowIgnoreSilent').hidden = !isNativeApp();
+    /* 消音スイッチの扱いは、ネイティブ版と
+       navigator.audioSession を持つブラウザ（iOS 16.4以降のSafari）で切り替えられる。
+       どちらでもない環境では切っても入れても何も変わらないので行ごと隠す。
+       ブラウザ版は「消音でも鳴る」と「ほかのアプリを止めない」が両立しないため、
+       同じトグルでも意味が違う。説明文をここで出し分ける。 */
+    $('#rowIgnoreSilent').hidden = !(isNativeApp() || canPickAudioSession());
+    $('#ignoreSilentNote').textContent = isNativeApp()
+      ? 'アプリを開いているときのアラーム音のみ。閉じているときの通知音は iPhone の設定に従います'
+      : 'ONだと消音スイッチを切っていても鳴りますが、アラームの間だけYouTubeなど他アプリの音が止まります。OFFなら他アプリを止めませんが、消音中は鳴りません';
     $('#soundDiagSection').hidden = !isNativeApp();
     renderSoundDiag();
   }
@@ -4367,6 +4388,12 @@
       timerSettings.ignoreSilent = e.target.checked;
       saveTimerSettings();
       applySilentModeSetting().then(renderSoundDiag);
+      // ブラウザ版は引き換えに失うものがあるので、切り替えた結果をその場で伝える
+      if (!isNativeApp()) {
+        toast(timerSettings.ignoreSilent
+          ? '消音でも鳴ります（アラーム中は他アプリの音が止まります）'
+          : '他アプリの音を止めません（消音中は鳴りません）');
+      }
     });
     $('#toggleNotifyOn').addEventListener('change', function (e) {
       timerSettings.notifyOn = e.target.checked;
