@@ -56,7 +56,12 @@
     try { return !!navigator.audioSession; } catch (e) { return false; }
   }
   function setAudioSessionType(type) {
-    if (isNativeApp()) return false;               // ネイティブ版はAVAudioSessionが本体
+    /* ネイティブ版の AVAudioSession はアプリ側（AppDelegate / AlarmAudioPlugin）が握っている。
+       JS から種別を上げ下げすると WebKit がそれを AVAudioSession に反映し、
+       アプリ側の「.playback + .mixWithOthers」（＝消音でも鳴る かつ ほかを止めない）を壊す。
+       ただし ambient の宣言だけは通す。WebView が何か音を出したときに WebKit が
+       勝手に「ほかを止める種別」へ格上げするのを防ぐ意味があり、害がないため。 */
+    if (isNativeApp() && type !== AUDIO_SESSION_IDLE) return false;
     try {
       if (!navigator.audioSession) return false;   // iOS16.3以前など未対応の環境
       navigator.audioSession.type = type;
@@ -2355,18 +2360,38 @@
      .playback にすると消音でも鳴るようになる（AlarmAudioプラグイン＝AppDelegate.swift）。
      プラグインが無い／古いビルドでは reject されるが、AppDelegate 側が起動時に
      .playback を張っているので「鳴る」状態が既定になる（設定が効かないだけで無音にはならない）。 */
+  /* いま実際に有効なオーディオセッションを OS から読んで、日本語1行にする。
+     見たいのは「ほかのアプリの音を止める設定になっていないか」なので、
+     カテゴリ名だけでなく mixWithOthers の有無を必ず出す。 */
+  function refreshSessionDiag() {
+    var pl = nativePlugin('AlarmAudio');
+    if (!pl) return Promise.resolve('NG: プラグイン未登録');
+    var p;
+    try { p = pl.sessionState(); }
+    catch (e) { return Promise.resolve('実測できません（古いビルド）'); }
+    if (!p || !p.then) return Promise.resolve('実測できません（古いビルド）');
+    return p.then(function (r) {
+      if (!r) return '取得できず';
+      var mix = r.mixWithOthers ? 'ほかのアプリと混ざる' : 'ほかのアプリを止める';
+      var others = r.otherAudioPlaying ? ' / ほかのアプリが再生中' : '';
+      var opts = (r.options && r.options.length) ? ' [' + r.options.join(',') + ']' : '';
+      return (r.category || '不明') + '（' + mix + '）' + opts + others;
+    }).catch(function () { return '実測できません（古いビルド）'; });
+  }
+
   function applySilentModeSetting() {
     /* ブラウザ版に AVAudioSession は無いが、代わりに navigator.audioSession の種別を
        握っている。何が効いているかを診断欄と同じ変数に残しておく。 */
     if (!isNativeApp()) { soundDiag.session = describeWebAudioSession(); return Promise.resolve(false); }
     var pl = nativePlugin('AlarmAudio');
     if (!pl) { soundDiag.session = 'NG: プラグイン未登録'; return Promise.resolve(false); }
+    /* ここで soundDiag.session に「設定した値」を書かない。
+       それを書くと自分の書き込みを読み返すだけになり、WebView に上書きされていても
+       同じ表示になって気づけない（Phase 9.15 で実際に取り逃がした）。
+       欄は refreshSessionDiag() が OS から読み直した実測値で埋める。 */
     return pl.setIgnoreSilentMode({ value: !!timerSettings.ignoreSilent })
-      .then(function (r) {
-        soundDiag.session = (r && r.category ? r.category : (timerSettings.ignoreSilent ? 'playback' : 'ambient'));
-        return true;
-      })
-      .catch(function () { soundDiag.session = 'NG: 呼び出し失敗'; return false; });
+      .then(function () { return true; })
+      .catch(function () { return false; });
   }
 
   /* ---- 通知音として使うWAVを Library/Sounds/ へ置く ----
@@ -3656,7 +3681,7 @@
      書き込みと画面反映をここに集約してあるので、soundDiag と表示がずれることもない。 */
   var DIAG_TARGET = {
     perm: '#diagPerm', pending: '#diagPending', delivered: '#diagDelivered',
-    ios: '#diagIos', files: '#diagFiles'
+    ios: '#diagIos', files: '#diagFiles', session: '#diagSession'
   };
   var diagSeq = {};
   function claimDiag(key) {
@@ -3721,6 +3746,15 @@
     try { ctx.suspend(); } catch (e) { /* noop */ }
   }
   function unlockAudio() {
+    /* ネイティブ版はアラームを AVAudioPlayer で鳴らすので、WebView 側を解錠する必要がない。
+       無音WAVの再生も AudioContext の起動も、WKWebView にオーディオセッションを掴ませる動作で、
+       ほかのアプリの音を止めうる。やらないのがいちばん安全。
+       万一ネイティブ再生が失敗したときの控えとして、音源の読み込みだけはしておく（再生はしない）。 */
+    if (isNativeApp()) {
+      try { setAlarmSource(timerSettings.sound); } catch (e) { /* noop */ }
+      applySilentModeSetting();
+      return;
+    }
     try {
       if (!timer.audioCtx) {
         var AC = window.AudioContext || window.webkitAudioContext;
@@ -3776,10 +3810,9 @@
   /* 同梱WAVを再生する。stopAfterSec>0 なら途中で止める（設定画面の試聴用）。
      再生できなかったときだけ、旧方式のオシレーター合成にフォールバックする。 */
   function playAlarmFile(key, stopAfterSec) {
-    var el = setAlarmSource(key);
-    var full = !stopAfterSec;
     /* 鳴らす直前にセッションを transient へ上げる（ほかのアプリの音の上に重ねる）。
-       鳴り終わったら ambient へ戻す＝相手の音量が下がったままにならない。 */
+       鳴り終わったら ambient へ戻す＝相手の音量が下がったままにならない。
+       ※ネイティブ版では何もしない（AVAudioSession をアプリ側が持っているため） */
     var sessionToken = beginAlarmSession();
     /* 想定より長く transient のままになると、相手の音が小さいままになる。
        ended が来なかった場合の保険として、必ず戻す時刻を切っておく
@@ -3790,6 +3823,58 @@
       endAlarmSession(sessionToken);
       sleepAudioCtx();
     }, (stopAfterSec > 0 ? stopAfterSec : ALARM_MAX_SEC) * 1000 + 1000);
+    /* ネイティブ版は Swift 側（AVAudioPlayer）で鳴らす。
+       WKWebView の <audio> で鳴らすと、再生のたびに WebKit がオーディオセッションを
+       張り替えてしまい、AppDelegate で付けた .mixWithOthers が外れる
+       ＝YouTube などほかのアプリの音が止まる。呼べなければ従来どおり <audio> で鳴らす。 */
+    /* 試聴の打ち切りはネイティブ側でも予約するが、JS 側にも置いておく。
+       どちらか片方が失敗しても止まるようにするための二重化で、
+       止める処理（stopBeep）は何度呼んでも同じ結果になる。 */
+    if (stopAfterSec > 0) {
+      clearPreviewStop();
+      timer.previewStop = setTimeout(function () { timer.previewStop = null; stopBeep(); }, stopAfterSec * 1000);
+    }
+    if (playAlarmViaNative(key, stopAfterSec, sessionToken)) return;
+    playAlarmViaAudioEl(key, stopAfterSec, sessionToken);
+  }
+
+  /* ネイティブ側で鳴らせたら true。false のときは呼び出し側が <audio> で鳴らす。
+     true を返したあとに再生が失敗した場合は、この中から <audio> 経路へ回す。 */
+  function playAlarmViaNative(key, stopAfterSec, sessionToken) {
+    if (!isNativeApp()) return false;
+    var pl = nativePlugin('AlarmAudio');
+    if (!pl) return false;
+    var p;
+    // playAlarm を持たない古いビルドではプロキシが投げるか reject する。どちらも <audio> へ回す
+    try { p = pl.playAlarm({ name: key, seconds: stopAfterSec > 0 ? stopAfterSec : 0 }); }
+    catch (e) { return false; }
+    if (!p || !p.then) return false;
+    p.then(function (r) {
+      var mix = (r && r.mixWithOthers === false) ? ' / ほかのアプリを止める設定' : '';
+      soundDiag.play = 'OK アプリ本体で再生 (' + alarmFileName(key) +
+        (r && r.category ? ' / ' + r.category : '') + mix + ')';
+    }).catch(function () {
+      soundDiag.play = 'アプリ本体での再生NG → WebViewで再試行';
+      playAlarmViaAudioEl(key, stopAfterSec, sessionToken);
+    });
+    return true;
+  }
+
+  /* 鳴っているアラームをネイティブ側でも止める。鳴っていなくても失敗しない。 */
+  function stopAlarmViaNative() {
+    if (!isNativeApp()) return;
+    var pl = nativePlugin('AlarmAudio');
+    if (!pl) return;
+    try {
+      var p = pl.stopAlarm();
+      // stopAlarm を持たない古いビルドは reject する。<audio> 側の停止だけで足りるので黙る
+      if (p && p.catch) p.catch(function () { /* noop */ });
+    } catch (e) { /* noop */ }
+  }
+
+  function playAlarmViaAudioEl(key, stopAfterSec, sessionToken) {
+    var el = setAlarmSource(key);
+    var full = !stopAfterSec;
     if (!el) {
       soundDiag.play = 'NG: <audio>要素が無い';
       playViaAudioContextFallback(key, full);
@@ -3814,10 +3899,6 @@
         soundDiag.play = 'OK (' + alarmFileName(key) + ')';
       }
     } catch (e) { fallback('play()例外'); return; }
-    if (stopAfterSec > 0) {
-      clearPreviewStop();
-      timer.previewStop = setTimeout(function () { timer.previewStop = null; stopBeep(); }, stopAfterSec * 1000);
-    }
   }
   function clearAlarmSessionGuard() {
     if (timer.sessionGuard) { clearTimeout(timer.sessionGuard); timer.sessionGuard = null; }
@@ -3903,6 +3984,7 @@
   function stopBeep() {
     clearPreviewStop();
     clearAlarmSessionGuard();
+    stopAlarmViaNative();
     (timer.beepNodes || []).forEach(function (o) { try { o.stop(); o.disconnect(); } catch (e) { /* noop */ } });
     timer.beepNodes = [];
     try {
@@ -4328,7 +4410,6 @@
     try {
       $('#diagPlay').textContent = soundDiag.play;
       $('#diagNotif').textContent = soundDiag.notif;
-      $('#diagSession').textContent = soundDiag.session;
       $('#diagSched').textContent = soundDiag.sched;
       // OSに聞く必要がない（アプリ側の設定で決まる）ので、その場で組み立てて出す
       soundDiag.foreground = describeForegroundPresentation();
@@ -4345,6 +4426,7 @@
       writeDiag('perm', claimDiag('perm'), 'NG: プラグイン未登録');
     }
     // OSに聞かないと分からないものは、画面を開くたびに取り直す
+    fillDiag('#diagSession', 'session', refreshSessionDiag);
     fillDiag('#diagPending', 'pending', refreshPendingDiag);
     fillDiag('#diagDelivered', 'delivered', refreshDeliveredDiag);
     fillDiag('#diagIos', 'ios', refreshIosNotifDiag);

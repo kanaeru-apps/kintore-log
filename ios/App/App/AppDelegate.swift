@@ -72,16 +72,34 @@ enum AlarmAudioSession {
         return UserDefaults.standard.bool(forKey: preferenceKey)
     }
 
+    /// - Parameter activate: セッションを有効化するか。
+    ///   `setActive(true)` は「これから音を出す」という宣言で、ほかのアプリの再生に
+    ///   割り込む契機になりうる。**起動のたび・前面に戻るたびに呼ぶ必要はない**ので、
+    ///   既定では張り替えるだけにして、実際に鳴らす直前にだけ true で呼ぶ。
+    ///   （アプリを開いただけで YouTube が止まる、という報告への対処）
     @discardableResult
-    static func apply(ignoreSilentMode: Bool) -> String {
+    static func apply(ignoreSilentMode: Bool, activate: Bool = false) -> String {
         let category: AVAudioSession.Category = ignoreSilentMode ? .playback : .ambient
         do {
             try AVAudioSession.sharedInstance().setCategory(category, mode: .default, options: [.mixWithOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
+            if activate {
+                try AVAudioSession.sharedInstance().setActive(true)
+            }
             return ignoreSilentMode ? "playback" : "ambient"
         } catch {
             // 失敗しても WebView の既定動作のままアプリは動く。ここで落とす理由はない
             return "error"
+        }
+    }
+
+    /// セッションを手放す。
+    /// `.notifyOthersOnDeactivation` を付けると、こちらが割り込んで止めてしまった
+    /// ほかのアプリに「もう終わった」と伝わり、相手が再生を再開できる。
+    static func deactivate() {
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        } catch {
+            // 使っていない状態で呼ぶと失敗することがあるが、実害はない
         }
     }
 }
@@ -92,11 +110,14 @@ enum AlarmAudioSession {
 /// あのファイルは `cap sync` が毎回作り直すのでアプリ側のクラスは載せられない。
 /// そのため MainViewController の capacitorDidLoad() で手動登録している。
 @objc(AlarmAudioPlugin)
-public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin {
+public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioPlayerDelegate {
     public let identifier = "AlarmAudioPlugin"
     public let jsName = "AlarmAudio"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "setIgnoreSilentMode", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "playAlarm", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopAlarm", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "sessionState", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "installSounds", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "soundFiles", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "notificationSettings", returnType: CAPPluginReturnPromise),
@@ -181,6 +202,126 @@ public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         UserDefaults.standard.set(value, forKey: AlarmAudioSession.preferenceKey)
         let category = AlarmAudioSession.apply(ignoreSilentMode: value)
         call.resolve(["category": category])
+    }
+
+    // MARK: - アラーム音の再生
+
+    /// 再生中のプレイヤー。
+    /// ローカル変数のままにすると関数を抜けた時点で解放され、音が出ないか途中で切れる。
+    private var alarmPlayer: AVAudioPlayer?
+    /// 試聴の打ち切り予約。次の再生が始まったら取り消す（連打で先の予約が後の音を止めないように）。
+    private var alarmStopWork: DispatchWorkItem?
+
+    /// アラーム音を鳴らす。
+    ///
+    /// これまでは WebView の中の `<audio>` で鳴らしていたが、WKWebView はメディアを再生するとき
+    /// WebKit 自身がオーディオセッションを張り替える。そのとき AppDelegate で付けた
+    /// `.mixWithOthers` が外れてしまい、**YouTube などほかのアプリの音が止まる**。
+    /// AVAudioPlayer で鳴らせば WebKit は関与せず、こちらが決めたセッションのまま再生される。
+    ///
+    /// - Parameters:
+    ///   - name: 音源名（拡張子なし。`beep` など）
+    ///   - seconds: 0より大きいとその秒数で打ち切る（設定画面の試聴用）
+    @objc public func playAlarm(_ call: CAPPluginCall) {
+        let name = call.getString("name") ?? ""
+        let seconds = call.getDouble("seconds") ?? 0
+        guard let url = bundledSound(name) else {
+            call.reject("同梱されていない音源です: \(name)")
+            return
+        }
+        DispatchQueue.main.async {
+            // 前の音が残っていると重なって聞こえる。必ず止めてから始める
+            self.stopAlarmPlayback()
+            /* WebView に張り替えられていた場合に備えて、鳴らす直前にセッションを引き直す。
+               起動時にも張っているが、そのあいだに WebKit が触っている可能性があるため。 */
+            let category = AlarmAudioSession.apply(ignoreSilentMode: AlarmAudioSession.savedPreference(),
+                                                   activate: true)
+            do {
+                let player = try AVAudioPlayer(contentsOf: url)
+                player.numberOfLoops = 0
+                player.delegate = self // 自然に鳴り終わったことを受け取ってセッションを手放すため
+                player.prepareToPlay()
+                self.alarmPlayer = player
+                let started = player.play()
+                if seconds > 0 {
+                    let work = DispatchWorkItem { [weak self] in self?.stopAlarmPlayback() }
+                    self.alarmStopWork = work
+                    DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+                }
+                call.resolve([
+                    "ok": started,
+                    "category": category,
+                    "duration": player.duration,
+                    "mixWithOthers": AVAudioSession.sharedInstance().categoryOptions.contains(.mixWithOthers)
+                ])
+            } catch {
+                self.alarmPlayer = nil
+                call.reject("再生に失敗しました: \(name)")
+            }
+        }
+    }
+
+    /// 鳴っているアラームを止める。鳴っていなくても失敗しない。
+    @objc public func stopAlarm(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.stopAlarmPlayback()
+            call.resolve()
+        }
+    }
+
+    /// 最後まで鳴り終わったとき。
+    /// ここが無いと、鳴り終わってもセッションを掴んだままになり、
+    /// 万一ほかのアプリを止めていた場合に相手が再開できない
+    /// （途中で止めたときだけ手放す、という片手落ちになる）。
+    public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            // 次の音が既に鳴り始めていたら、そちらのセッションを巻き添えにしない
+            guard let self = self, self.alarmPlayer === player else { return }
+            self.stopAlarmPlayback()
+        }
+    }
+
+    private func stopAlarmPlayback() {
+        alarmStopWork?.cancel()
+        alarmStopWork = nil
+        guard alarmPlayer != nil else { return } // 鳴っていないなら何も触らない
+        alarmPlayer?.stop()
+        alarmPlayer = nil
+        AlarmAudioSession.deactivate()
+    }
+
+    /// いま**実際に有効になっている**オーディオセッションを読んで返す。
+    ///
+    /// これまで診断欄に出していたのは `setCategory` に渡した値、つまり
+    /// 「アプリが設定しようとした値」であって、自分の書き込みを読み返しているだけだった。
+    /// WebView に上書きされていても同じ表示になるため、上書きに気づけない。
+    /// ここでは OS に問い合わせて、最終的に何が効いているかを返す。
+    @objc public func sessionState(_ call: CAPPluginCall) {
+        let s = AVAudioSession.sharedInstance()
+        var category = s.category.rawValue
+        switch s.category {
+        case .playback: category = "playback"
+        case .ambient: category = "ambient"
+        case .soloAmbient: category = "soloAmbient"
+        case .playAndRecord: category = "playAndRecord"
+        case .record: category = "record"
+        case .multiRoute: category = "multiRoute"
+        default: break
+        }
+        var options: [String] = []
+        let opts = s.categoryOptions
+        if opts.contains(.mixWithOthers) { options.append("mixWithOthers") }
+        if opts.contains(.duckOthers) { options.append("duckOthers") }
+        if opts.contains(.interruptSpokenAudioAndMixWithOthers) { options.append("interruptSpokenAudio") }
+        if opts.contains(.allowBluetooth) { options.append("allowBluetooth") }
+        if opts.contains(.defaultToSpeaker) { options.append("defaultToSpeaker") }
+        call.resolve([
+            "category": category,
+            "options": options,
+            "mixWithOthers": opts.contains(.mixWithOthers),
+            "otherAudioPlaying": s.isOtherAudioPlaying,
+            "playing": alarmPlayer?.isPlaying ?? false
+        ])
     }
 
     /// 通知音の置き場所（Library/Sounds）。iOS の UNNotificationSound が探すのはここか

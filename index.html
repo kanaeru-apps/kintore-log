@@ -17,7 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.13.14">
+<link rel="stylesheet" href="css/style.css?v=0.13.15">
 <!-- テーマの初期設定。CSSより先に <html data-theme> を決めておかないと、起動の一瞬だけ
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
@@ -304,7 +304,7 @@
 
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレLog v0.13.14 — Phase 8</p>
+      <p class="version">筋トレLog v0.13.15 — Phase 8</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -349,7 +349,7 @@
         <div class="panel-list">
           <div class="s-row"><div class="s-main"><b>アラーム音の再生</b><small id="diagPlay">—</small></div></div>
           <div class="s-row"><div class="s-main"><b>通知音の準備</b><small id="diagNotif">—</small></div></div>
-          <div class="s-row"><div class="s-main"><b>消音モードの扱い</b><small id="diagSession">—</small></div></div>
+          <div class="s-row"><div class="s-main"><b>音の扱い（実測）</b><small id="diagSession">—</small></div></div>
           <div class="s-row"><div class="s-main"><b>通知の許可</b><small id="diagPerm">—</small></div></div>
           <div class="s-row"><div class="s-main"><b>iPhone側の通知設定</b><small id="diagIos">—</small></div></div>
           <div class="s-row"><div class="s-main"><b>アプリを開いている時の通知</b><small id="diagForeground">—</small></div></div>
@@ -583,9 +583,9 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.13.14"></script>
-<script src="js/app.js?v=0.13.14"></script>
-<script src="js/charts.js?v=0.13.14"></script>
+<script src="js/db.js?v=0.13.15"></script>
+<script src="js/app.js?v=0.13.15"></script>
+<script src="js/charts.js?v=0.13.15"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});
