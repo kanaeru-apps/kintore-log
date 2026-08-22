@@ -62,7 +62,8 @@
   --p-etc: #9ba0a8;
 
   --radius: 16px;
-  --font-num: 'Bebas Neue', 'Arial Narrow', Impact, sans-serif;
+  /* App Store版の起動時通信を避けるため、数字表示も端末内のフォントだけを使う。 */
+  --font-num: 'Helvetica Neue Condensed Bold', 'Arial Narrow', Impact, sans-serif;
   --font-body: 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic UI', 'Yu Gothic', Meiryo, sans-serif;
 }
 

@@ -1,0 +1,33 @@
+App Review Information — Kintore Log (Muscle Training Log)
+
+Build under review: [BUILD NUMBER]
+Screen recording attached to the Resolution Center reply: [ATTACHED VIDEO FILE NAME]
+
+1. Physical-device screen recording
+The attached recording was captured on a physical [IPHONE MODEL] running iOS [IOS VERSION]. It starts from the Home Screen, launches the app, and demonstrates the typical flow: creating a strength-training record, viewing history and charts, using the RM calculator, starting the interval timer, granting notification permission, and receiving the local timer notification while the app is in the background/locked.
+
+2. Devices and operating systems tested
+- [IPHONE MODEL] — iOS [IOS VERSION]
+- [OPTIONAL SECOND IPHONE MODEL AND IOS VERSION, OR DELETE THIS LINE]
+Only the devices and OS versions listed above were tested for this submission.
+
+3. Functions, audience, problem, and value
+Kintore Log is an iPhone workout log for people who want to record gym sessions quickly. Users can record strength sets (exercise, equipment, weight, repetitions, and memo) and cardio sessions; review history in a calendar; view 1RM and training-volume charts; calculate estimated 1RM; manage exercises; use an interval timer with local notifications; and import/export CSV files. The app reduces data-entry time through drum-style numeric selectors and shows previous-set values for reference.
+
+4. Access and setup instructions
+No account, registration, login, demo credentials, subscription, purchase, or sample file is required. Launch the app and tap the + control on the Record tab to add a workout. History, Charts, Timer, Calculator, and Settings are available from the bottom tab bar. To test a timer notification, open Timer, choose a short duration, tap Start, allow notification access when requested, and place the app in the background or lock the device.
+
+5. External services, tools, and platforms
+No external service is required for the core workout-recording functionality. Workout records remain on the device. The app uses Apple iOS local notifications, local storage/filesystem, haptics, and the standard share/file interfaces. An optional feedback form sends only the text entered by the user, an optional email address, and the app version to a developer-managed Google Apps Script endpoint. User-initiated links can open a YouTube search, a reference-video URL entered by the user, or the Apple App Store review page. The App Store build has no cloud-sync feature and includes no authentication, payment processor, advertising, analytics, AI service, remote push-notification server, or third-party tracking SDK.
+
+6. Regional differences
+The app functions consistently in all regions where it is available. There are no region-specific features or content. The interface is Japanese and workout weights are displayed in kilograms.
+
+7. Regulated industry or protected third-party material
+The app is a personal fitness log, not a medical device or medical service. Estimated 1RM values are informational calculations and are not medical advice. The app does not embed or distribute protected third-party content. YouTube is opened only as a user-initiated external search.
+
+Additional review details
+- No user-generated content is shared publicly.
+- No account-deletion flow is applicable because the app has no accounts.
+- No camera, microphone, location, contacts, App Tracking Transparency, HealthKit, or advertising-identifier access is requested.
+- The only sensitive-capability prompt in the normal flow is notification permission for the interval timer.

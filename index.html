@@ -12,12 +12,12 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
+<!-- 数字表示は端末内のシステムフォントだけを使用する。
+     起動時に外部フォントサービスへ通信しないことで、オフライン動作と
+     プライバシーポリシーの説明を実際の挙動に一致させる。 -->
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.13.15">
+<link rel="stylesheet" href="css/style.css?v=0.13.16">
 <!-- テーマの初期設定。CSSより先に <html data-theme> を決めておかないと、起動の一瞬だけ
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
@@ -304,7 +304,7 @@
 
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレLog v0.13.15 — Phase 8</p>
+      <p class="version">筋トレLog v0.13.16 — Phase 8</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -583,9 +583,9 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.13.15"></script>
-<script src="js/app.js?v=0.13.15"></script>
-<script src="js/charts.js?v=0.13.15"></script>
+<script src="js/db.js?v=0.13.16"></script>
+<script src="js/app.js?v=0.13.16"></script>
+<script src="js/charts.js?v=0.13.16"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});

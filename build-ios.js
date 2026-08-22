@@ -208,13 +208,22 @@ if (si === -1 || ei === -1 || ei < si) {
   console.error('\n[中止] スタブの目印（@sync:stub-start / @sync:stub-end）が出力に見つかりません。\n');
   process.exit(1);
 }
-const inspected = built.slice(0, si) + built.slice(ei + STUB_END.length) + fs.readFileSync(htmlPath, 'utf8');
+const builtHtml = fs.readFileSync(htmlPath, 'utf8');
+const inspected = built.slice(0, si) + built.slice(ei + STUB_END.length) + builtHtml;
 const found = FORBIDDEN.filter((s) => inspected.includes(s));
 if (found.length) {
   console.error(
     `\n[中止] App Store 版にクラウド同期の部品が残っています： ${found.join(' / ')}\n` +
     `　　　 該当箇所を @sync:start 〜 @sync:end で囲むか、スタブ側へ移してください。\n`
   );
+  process.exit(1);
+}
+// 起動時に外部フォントを取得すると「主要機能はオフライン」という説明と食い違うため、
+// App Store版では端末内のシステムフォントだけを使う。
+const REMOTE_FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
+const remoteFontHosts = REMOTE_FONT_HOSTS.filter((host) => builtHtml.includes(host));
+if (remoteFontHosts.length) {
+  console.error(`\n[中止] App Store 版に外部Google Fonts参照が残っています： ${remoteFontHosts.join(' / ')}\n`);
   process.exit(1);
 }
 // ご意見フォーム（FEEDBACK_GAS_URL）は App Store 版にも残す正規の機能なので、
@@ -228,6 +237,7 @@ if (!built.includes('FEEDBACK_GAS_URL')) {
 const version = (html.match(/class="version">[^<]*?v([\d.]+)/) || [])[1] || '不明';
 console.log(`\n✓ www/ を生成しました（v${version}）`);
 console.log(`  - クラウド同期をスタブに差し替え（${blocks.length}ブロック除去）`);
+console.log('  - 外部Google Fonts参照なし');
 console.log('  - Service Worker 登録を除去');
 console.log('  - js/capacitor.js の読み込みを追加');
 console.log('  次は: npx cap sync ios\n');
