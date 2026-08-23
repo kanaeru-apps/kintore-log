@@ -17,7 +17,7 @@
      プライバシーポリシーの説明を実際の挙動に一致させる。 -->
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.13.16">
+<link rel="stylesheet" href="css/style.css?v=0.13.17">
 <!-- テーマの初期設定。CSSより先に <html data-theme> を決めておかないと、起動の一瞬だけ
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
@@ -139,7 +139,7 @@
           <button class="btn primary" id="twStart">START</button>
         </div>
 
-        <p class="timer-note">終了時に音・通知・アプリバッジでお知らせします。作動中は画面が消えないようにします（iPhoneはアプリを開いている間に有効）。</p>
+        <p class="timer-note" id="timerNote">終了時に音・通知・アプリバッジでお知らせします。作動中は画面が消えないようにします（iPhoneはアプリを開いている間に有効）。</p>
       </div>
 
       <!-- 実行中／終了 -->
@@ -304,7 +304,7 @@
 
       <div id="syncSectionContainer"></div>
 
-      <p class="version">筋トレLog v0.13.16 — Phase 8</p>
+      <p class="version">筋トレLog v0.13.17 — Phase 8</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -332,7 +332,7 @@
             <label class="toggle"><input type="checkbox" id="toggleVibrateOn"><span class="toggle-track"></span></label>
           </div>
           <div class="s-row" id="rowIgnoreSilent" hidden>
-            <div class="s-main"><b>消音モードでも鳴らす</b><small id="ignoreSilentNote">アプリを開いているときのアラーム音のみ。閉じているときの通知音は iPhone の設定に従います</small></div>
+            <div class="s-main"><b id="ignoreSilentLabel">消音モードでも鳴らす</b><small id="ignoreSilentNote">アプリを開いているときのアラーム音のみ。閉じているときの通知音は iPhone の設定に従います</small></div>
             <label class="toggle"><input type="checkbox" id="toggleIgnoreSilent"><span class="toggle-track"></span></label>
           </div>
           <div class="s-row">
@@ -583,9 +583,9 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.13.16"></script>
-<script src="js/app.js?v=0.13.16"></script>
-<script src="js/charts.js?v=0.13.16"></script>
+<script src="js/db.js?v=0.13.17"></script>
+<script src="js/app.js?v=0.13.17"></script>
+<script src="js/charts.js?v=0.13.17"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('./sw.js').catch(function () {});

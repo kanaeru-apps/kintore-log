@@ -2,7 +2,7 @@
 
 ## 現在地（2026-08-22 時点 / 最初にここを読む）
 
-**バージョン**：`v0.13.16` ／ `sw.js` の `CACHE` は `kintore-v60`
+**バージョン**：`v0.13.17` ／ `sw.js` の `CACHE` は `kintore-v61`
 
 **いま追っている問題**：App Store 1.0（build 16）が2026-08-19に
 **Guideline 2.1 - Information Needed** で却下された。Appleからは、最新OSの実機で撮影した
@@ -15,6 +15,11 @@
 App Store版の生成時に外部Google Fonts参照が残っていれば停止する検査も追加した。
 審査Notesの英語回答案は `store/app-review-notes-en.txt`、実機録画と再提出の手順は
 `store/app-review-screen-recording-checklist-ja.md` を使う。
+
+**v0.13.17 のPWAタイマー修正**：YouTube再生中・消音モードでも終了音を聞き逃さないことを優先し、
+PWAのアラーム中だけAudio Sessionを`playback`にする。開始操作内の音声アンロックより前に前回音を停止し、
+直後の`pause()`でアンロックを打ち消していた順序も修正。PWAをバックグラウンドへ回すとiOSが停止する制約と、
+終了音の数秒間はYouTubeなどが止まる場合があるトレードオフをタイマー画面・設定画面に表示する。
 
 **次の関門**：`main`から新しいbuildを作り、その同一buildを最新iOSの実機へTestFlightで入れる。
 通知を含む通常フローを実機録画し、実測した端末モデル・iOS・build番号・動画名をNotesへ入力してから、
@@ -2107,7 +2112,7 @@ Phase 9.13 の設計書には「ネイティブ版は `.playback + .mixWithOther
 - Service Worker登録は `location.protocol` がhttpの時のみ（file://でのローカル確認時はスキップ）
 - ローカル確認方法：`index.html` をダブルクリックしてブラウザで開く（データはそのブラウザ内に保存される）
 - **アラーム音を変えるときは `tools/gen_alarm_wav.py` を直して叩き直し、`ALARM_ASSET_VERSION` も上げる**（上げないと端末の `Library/Sounds/` に残った古いWAVが通知音として使われ続ける。Phase 9-3）
-- **`sw.js` の `CACHE` は必ず上げる**（現行 `kintore-v60`）。上げないと古い資産が配られる
+- **`sw.js` の `CACHE` は必ず上げる**（現行 `kintore-v61`）。上げないと古い資産が配られる
 - **`navigator.vibrate` は iOS では存在しない**。ネイティブ版の振動は `@capacitor/haptics`（前面時のみ）、閉じているときは通知側に従う（Phase 9-3）
 
 ## 次のアクション
