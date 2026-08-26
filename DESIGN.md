@@ -2,7 +2,9 @@
 
 ## 現在地（2026-08-22 時点 / 最初にここを読む）
 
-**バージョン**：`v0.13.17` ／ `sw.js` の `CACHE` は `kintore-v61`
+**バージョン**：`v0.13.17` ／ `sw.js` の `CACHE` は `kintore-v62`
+
+**v0.13.17 のセキュリティ対応**：公開URLがコードから取得でき、ブラウザ側の回数制限を直接POSTで回避できた匿名フィードバックGASを廃止。設定画面はサポートメールへのリンクへ置換し、アプリから本文・メールアドレス・バージョンを自動送信しない。また、URLを知るだけで全記録を取得・上書きできたPWAの匿名スプレッドシート同期も廃止。旧GASへは `gas/feedback.gs` と `gas/code.gs` の拒否専用版を再デプロイする。
 
 **いま追っている問題**：App Store 1.0（build 16）が2026-08-19に
 **Guideline 2.1 - Information Needed** で却下された。Appleからは、最新OSの実機で撮影した
@@ -152,9 +154,9 @@ iPhoneで使う筋トレ記録アプリ。**PWA（Webアプリ）方式**で完�
 |---|---|---|
 | 公開方法 | GitHub Pages（無料） | リポジトリはpublicになる |
 | 公開先URL | https://kanaeru-apps.github.io/kintore-log/ （リポジトリ `kanaeru-apps/kintore-log`） | 2026-07-26に個人アカウントから組織アカウントへ移設。URL・コミット履歴から開発者の実名が見えないようにするため（下記 Phase 7-0） |
-| データ保存 | 端末内（localStorage）＋ Googleスプレッドシート二重保存 | Phase 4でGAS連携 |
+| データ保存 | 端末内（localStorage）／手動CSV書き出し | 匿名GAS同期はv0.13.17で廃止 |
 | ローカルDB | localStorage（抽象化レイヤー js/db.js 経由） | 記録データは軽量（数年分でも数百KB）。file://でも動作し確実。将来IndexedDBへ移行可能な構造 |
-| GAS URLの扱い | **コードに埋め込まない**。アプリ内設定画面で入力し端末内にのみ保存 | publicリポジトリに秘密情報を置かないため |
+| 外部バックアップ | iOS標準バックアップ／手動CSV | 認証なしの外部同期は提供しない |
 | グラフ | 外部ライブラリ不使用・自作SVG（Phase 3で決定・実装） | オフラインで確実に動く／ダーク・ボルトイエロー配色に完全に合わせられる／既存の人体図・RMダイヤルと同じ方式 |
 | 推定1RM | Epley式：1RM = 重量 × (1 + 回数÷30) | |
 | ボリューム定義 | Σ(重量 × 回数) | 部位別・期間別レポートの基礎数値 |
@@ -282,6 +284,7 @@ iPhoneで使う筋トレ記録アプリ。**PWA（Webアプリ）方式**で完�
   4. **重量・回数などの数値入力欄をキーボードロック強化**：`type="number"`は端末・キーボードアプリによって数字以外の入力方式に切り替えられる余地があるため、`type="text"`＋`inputmode`（整数は`numeric`＋`pattern="[0-9]*"`、小数可の項目は`decimal`）に統一（重量直接入力・回数・カロリー系のカーソル項目・有酸素の時/分/秒）。合わせて不要になった数値スピナー非表示CSS（`input[type='number']`向け）を削除。なお`inputmode`はあくまでOSへのヒントであり、ユーザーが手動でキーボードを切り替える操作自体は防げない
   - jsdomでランキング計算・トースト発火/抑止・入力属性・タイマーのsetTimeout発火と冪等性ガードを検証（計30アサーション）、Chrome headlessでグラフのベスト記録カードと記録タブの新入力欄を目視確認
 - [x] **Phase 4：Googleスプレッドシート同期（2026-07-13 実装 / v0.6.0）**
+  - **v0.13.17で廃止**：認証なしのGAS URLが事実上の鍵で、URL漏えい時に第三者が全記録を取得・上書きできるため。以下は廃止前の履歴として残す
   - **同期方向・タイミング（決定事項）**：端末→スプレッドシートの一方向のみ（シート側の手編集はアプリに反映されない。誤操作でデータが壊れる心配がない）。同期は自動送信せず「今すぐバックアップ」ボタンを押した時だけ手動送信。送信粒度は前回同期以降に変更があった日だけの差分送信（`DB.dirtyDates()`）
   - **一般公開時の配慮**：設定画面には常時表示しない。非エンジニアの一般ユーザーがGASのセットアップという専門的な手順に迷わないよう、設定画面最下部の「バージョン表示」を7回連続タップした時だけ「クラウド同期」セクションが出現する隠しトリガー方式（`onVersionTap`）。解除状態は`localStorage`（`kintore_sync_unlocked`）にこの端末限定で保存され、以後は毎回表示される。なおリポジトリはpublicなためソースを読めばトリガーの仕組み自体は分かる＝UI上の配慮であり秘匿ではない、という前提をユーザーと確認済み
   - **db.js**：`state.dirtyDates`（日付→true のマップ）を追加。`addEntry`/`removeEntry`/`addSet`/`updateSet`/`removeSet`/`setMemo`/`deleteWorkout`のすべてで対象日をdirty化。導入前からの既存データは初回読み込み時に全記録日を自動でdirty化し、初回バックアップで全履歴を送れるようにする。`DB.dirtyDates()`/`DB.clearDirty(dates)`を公開
@@ -317,10 +320,9 @@ iPhoneで使う筋トレ記録アプリ。**PWA（Webアプリ）方式**で完�
   - v0.8.4: バックアップ済み時のconfirm文言を「✅ すべてバックアップ済みです」に改善。JS/CSSの読み込みURLに`?v=`を付与（GitHub PagesのHTTPキャッシュmax-age=600でindex.htmlとJSの新旧が混在するのを防止。**バージョンアップのたびに`?v=`も更新すること**）。sw.jsのオフラインフォールバックを`ignoreSearch`でクエリ非依存に
 - [x] **Phase 6：一般公開準備・ご意見受付（2026-07-25 実装 / v0.9.0）**
   - **背景**：一般公開にあたり、(1)一般ユーザーに見せるべきでない開発者向けUIの整理、(2)ユーザーからの不満・改善要望を受け取る窓口が必要
-  - **ご意見・ご要望フォーム**：設定画面に「サポート」セクションを追加。本文（最大1000文字）＋メールアドレス（任意・空欄OK。「内容についてこちらからご連絡することがあります。」の注記）＋送信ボタン。送信先は受付専用GAS（`gas/feedback.gs`・新規）で、受付スプレッドシートの「ご意見」シートに日時・本文・メール・アプリバージョンを蓄積し、オーナー宛にメール通知（MailApp）。スパム対策：本文必須・1000文字制限・同一端末から1日5回まで（`kintore_fb_日付`でカウント）
-  - **受付GAS URLの扱い**：公開前提の受付窓口のため`FEEDBACK_GAS_URL`定数としてコードに直接埋め込む（バックアップ用GASの「埋め込まない」方針とは別物：書き込み専用で記録データとは無関係）。**空文字の間はサポートセクション自体が非表示**（ユーザーのGASデプロイ後にURLを埋めて有効化する）
-  - **一般公開向け整理**：記録0件時の「クラウドバックアップから復元」ボタンを、クラウド同期を使っている端末（隠し機能解除済みまたはGAS URL設定済み）だけに表示。設定画面に「プライバシー」セクション（データは端末内保存・開発者は記録を見られない旨）を追加
-  - 通知メール宛先は`NOTIFY_EMAIL`定数（空ならスプレッドシートのオーナー宛）
+  - **ご意見・ご要望フォーム（v0.13.17で廃止）**：当初は受付専用GASへ匿名送信していたが、公開URLへの直接POSTをサーバー側で利用者単位に制限できないため廃止。現在は端末のメールアプリを開くリンクだけを表示する
+  - **旧受付GAS**：`gas/feedback.gs` は既存デプロイを安全に停止するための拒否専用コードとして残す。シート書き込み・メール送信は行わない
+  - **一般公開向け整理（復元導線はv0.13.17で廃止）**：設定画面に「プライバシー」セクション（データは端末内保存・開発者は記録を見られない旨）を追加
 - [x] **Phase 7-0：公開URL・コミット履歴の匿名化（2026-07-26 実施）**
   - **背景**：App Store公開を見据え、公開物から開発者の実名を外したい。実名が露出していた箇所は (1)GitHub PagesのURL（`chihirohonma.github.io`）、(2)リポジトリのオーナー名、(3)全40コミットの作者名とメールアドレス の3つ
   - **実施内容**：`git filter-repo --mailmap` で全コミットの author/committer を `kanaeru-apps <kanaeru-apps@users.noreply.github.com>` に書き換え、組織アカウント `kanaeru-apps` に**新規リポジトリを作って通常pushした**（既存リポジトリへのforce pushではない）
@@ -395,7 +397,7 @@ PWA版（`kanaeru-apps.github.io/kintore-log/`）は**今のまま残し、自�
 |---|---|---|---|
 | 配布 | GitHub Pages | App Store | App Store |
 | データ保存 | localStorage | localStorage＋Documents書き出し | 同左 |
-| クラウド同期 | GAS Web App（URL手入力） | **なし** | Googleログイン＋Sheets API |
+| クラウド同期 | **なし**（匿名GASはv0.13.17で廃止） | **なし** | Googleログイン＋Sheets API |
 | タイマー通知 | 画面ロック中は鳴らない | **ローカル通知で鳴る** | 同左 |
 
 **v1.0で同期を載せない理由**（2026-08-10 ユーザー決定）：GAS方式は「自分でGASプロジェクトを作ってデプロイしてURLを貼る」という手順が必要で、一般ユーザーには使えない。かといって「上級者向け」として畳んで載せると、App Store説明文・Review Notes・アプリ内警告文の3か所に説明を書く必要が出る（ガイドライン2.3.1が hidden / undocumented features を禁じているため）。**その説明コストはv1.1のGoogleログイン導入で全部消える**ので、暫定的に説明を書くより、v1.0では同期そのものを外して確実に審査を通し、公開を最優先する。
@@ -406,11 +408,11 @@ PWA版（`kanaeru-apps.github.io/kintore-log/`）は**今のまま残し、自�
 - 現行アプリの全機能（記録・履歴・グラフ・タイマー・計算機・設定）
 - **iCloudバックアップ対応**（7-3）
 - **ローカル通知**（7-4）
-- ご意見・ご要望フォーム（現行のまま。ユーザーサポート窓口として残す）
+- サポートメールへのリンク（アプリからの匿名POSTは行わない）
 - CSVエクスポート／インポート（既存。手動バックアップ手段として重要）
 
 **外すもの**
-- **クラウド同期セクション一式**（GAS URL入力欄・自動送信・復元）
+- **クラウド同期セクション一式**（PWA・App Storeの両方から廃止）
 
 **決定済み事項**
 
@@ -475,25 +477,14 @@ PWA版（`kanaeru-apps.github.io/kintore-log/`）は**今のまま残し、自�
 
 **「休養日リマインダー」は入れない（2026-08-10 ユーザー決定）**：当初は4.2対策を厚くする目的で「最終トレーニング日からN日経過で通知」を併記していたが、(1)**4.2の説明はタイマー通知だけで成立する**（既存の実害を潰す機能であり、取ってつけた通知ではない）、(2)通知機能が増えるほど初回の権限要求が重くなり一般ユーザーに嫌われる、(3)そもそも「休養日リマインダー」という名前が**「今日は休養日です」と読めるのに実際はサボり検知**で、名前と中身が食い違っていた（v0.11.1の「すべて表示」ボタンと同じ誤読の構造）。必要になれば後から追加できる。
 
-### 7-5. GAS同期の除外方法
+### 7-5. GAS同期の廃止と再混入防止
 
-コードを残したまま画面から隠すのは、ガイドライン2.3.1（hidden features）の観点で望ましくない。**ビルド時にソースごと除去する**方式にする。
-
-`build-ios.js`（新規）がリポジトリ直下のソースを `www/` へコピーしながら変換する。**PWA版のソースは一切変えない**（マーカーコメントを足すだけ）ので、自分の運用に影響しない。
-
-**方式：マーカー＋スタブ差し替え（2026-08-10、実装時に変更）**
-
-当初は「マーカーで囲んだ範囲を削除する」つもりだったが、実装前にソースを調べたところ、同期関数はアプリの各所から**7か所**で呼ばれていた（記録タブの空状態・設定画面の描画・イベント登録・起動時・画面切替時）。削除するだけでは呼び出し側が `ReferenceError` になり、**アプリ自体が起動しなくなる**。そこで次の方式に改めた。
-
-- ソースを `/* @sync:start */` 〜 `/* @sync:end */` で囲む（現在**3ブロック**：同期関数の本体／記録タブからの復元導線／設定画面のイベント登録）
-- ビルド時、**1つ目のブロックを「何もしない同名関数10個」のスタブに差し替え**、2つ目以降は削除する
-- 呼び出し側のコードは**一行も書き換えない**。PWA版とApp Store版でソースを分岐させずに済む
-- ブロック数が想定と変わったらビルドを中止する（`EXPECTED_BLOCKS`）。マーカーの書き損じに気づかないまま出力しないため
+v0.13.16まではPWAに匿名GAS同期を残し、App Store版だけビルド時にマーカー範囲をスタブへ差し替えていた。v0.13.17では認可不備を解消するため、PWA・App Storeの両方から同期処理、復元導線、設定イベントを削除した。両版で同じ「同期なし」のソースを使用する。
 
 **自動検証（`build-ios.js` に内蔵）**：生成後の `www/js/app.js` と `www/index.html` から、同期を実際に動かす部品（`kintore_gas_url` / `kintore_last_sync` / `kintore_sync_unlocked` / `gasUrlInput` / `syncNowBtn` / `restoreCloudBtn` / `action: 'restore'`）が消えていることを確認し、残っていればビルドを中止する。
 
-- 検査はスタブの範囲（`@sync:stub-start` 〜 `@sync:stub-end`）を除いて行う。スタブ自身が `runSync` などの名前を含むため、除かないと自分の生成物を誤検出する（実際に一度これで止まった）
-- `script.google.com` は**ご意見・ご要望フォーム**（`FEEDBACK_GAS_URL`）で正規に使うため、文字列の存在自体は禁止しない
+- 保存キー、URL入力欄、復元リクエストなど、廃止済み同期の識別子が再混入した場合はビルドを中止する
+- 廃止済みの `FEEDBACK_GAS_URL` / `fbSendBtn` / `kintore_fb_` がApp Store用生成物へ残っていればビルドを中止する
 - ビルド環境の注意：`fs.cpSync(..., {recursive:true})` は Node v24.14.1 / Windows でプロセスごと異常終了する（終了コード 0xC0000409）。`build-ios.js` は自前の再帰コピーを使っている
 
 ### 7-6. 申請物一式
@@ -503,9 +494,9 @@ PWA版（`kanaeru-apps.github.io/kintore-log/`）は**今のまま残し、自�
 | アプリ名 | ✅ 決定 | **筋トレLog**。サブタイトル・キーワードとあわせて 7-11。端末のホーム画面に出る名前（`CFBundleDisplayName`）は「筋トレ記録」で設定済み → **App名に合わせて要変更**（7-11） |
 | アプリアイコン | ✅ 作成済み | `icons/icon-512.png` のダンベルをピクセル計測してSVGで組み直し、1024×1024で再生成（拡大ボケなし・アルファチャンネルなし）。`icons/icon-1024.png` に控えを保存 |
 | 起動画面 | ✅ 作成済み | 同じダンベルを黒背景の中央に配置（2732×2732）。Capacitorのデフォルト画像を差し替え済み |
-| プライバシーポリシー | ✅ 作成済み | `privacy-policy.html`。記録は端末内のみ／端末バックアップはApple管理下／ご意見フォームは本文・メール（任意）・バージョンの3点のみ／通知はローカル通知／第三者提供なし／トラッキングなし |
+| プライバシーポリシー | ✅ 作成済み | `privacy-policy.html`。記録は端末内のみ／端末バックアップはApple管理下／問い合わせは外部メールアプリで利用者が明示送信／通知はローカル通知／トラッキングなし |
 | サポートページ | ✅ 作成済み | `support.html`。問い合わせ先＋FAQ7項目。App Store Connect の「サポートURL」に指定する |
-| App Privacy申告 | 未整理 | 「連絡先情報＞メールアドレス」を**アプリの機能**目的で収集・**トラッキングなし**・ユーザーIDに紐付けない（任意入力のため）。それ以外は収集なし |
+| App Privacy申告 | 要再確認 | アプリ内匿名フォーム廃止後の実装に合わせて再確認する。サポートメールで利用者が明示送信する情報は、問い合わせ対応以外に利用しない |
 | スクリーンショット | 未作成 | 6.9インチ・6.5インチ必須。記録／履歴カレンダー／グラフ／タイマーの4枚 |
 | Review Notes | 未作成 | 下記 |
 
@@ -516,7 +507,7 @@ PWA版（`kanaeru-apps.github.io/kintore-log/`）は**今のまま残し、自�
 **Review Notes 案（v1.0・英語）**
 > This app is a workout log that works fully offline. No account, no login, and no server communication are required to use any feature.
 > All records are stored locally on the device and included in the standard iOS device backup.
-> The only network feature is an optional "Send feedback" form in Settings, where the user may voluntarily provide an email address to receive a reply. It is not required to use the app.
+> The Support link opens the user's mail app. The app does not automatically transmit feedback or workout data.
 > Local notifications are used for the rest/interval timer so that it can alert the user while the screen is locked or the app is in the background.
 
 ### 7-7. v1.1（Googleログイン同期）の設計方針
@@ -615,7 +606,7 @@ URL入力欄が消えて**「ログイン」1ボタン**になるため、「上
 |---|---|
 | `bundle_identifier` | `com.kanaeru.kintore` |
 | ビルド手順 | `npm install` → **`node build-ios.js`** → `npx cap sync ios` → `use-profiles` → `agvtool` → `build-ipa` |
-| `node build-ios.js` を挟む理由 | `www/` は追跡していないため、Codemagic上で生成しないと空になる。ここでクラウド同期のスタブ差し替えと混入チェックも走るので、**同期コードが残っているとこの段階でビルドが止まる** |
+| `node build-ios.js` を挟む理由 | `www/` は追跡していないため、Codemagic上で生成しないと空になる。ここで廃止済みGAS送信の混入チェックも走るので、**同期コードが戻っているとこの段階でビルドが止まる** |
 | `submit_to_testflight` | `false`（外部テスト審査への提出。前のビルドが審査中だと毎回失敗するため。内部テストは false でも即使える） |
 
 Codemagic側で必要な準備：リポジトリ接続、`Settings > Integrations` に App Store Connect の API キーを **`Codemagic` という名前で**登録（yaml の `integrations` がこの名前を参照している）。無音カメラで登録済みなら共用できる。**ただしAPIキーの共用だけでは足りず、Bundle IDごとの署名ファイル登録が別途必要**（7-14）。
@@ -700,7 +691,7 @@ App Store Connect のアプリ作成は完了済み（Apple ID `6800222286`）�
 
 **「アプリのプライバシー」**
 - プライバシーポリシーURL：`https://kanaeru-apps.github.io/kintore-log/privacy-policy.html`
-- 収集するデータ：**連絡先情報 › メールアドレス**のみ。目的=アプリの機能／トラッキング=しない／ユーザーIDに紐付け=しない（ご意見フォームの任意入力欄のため）
+- 収集するデータ：アプリ内匿名フォーム廃止後の仕様に合わせてApp Store Connect上で再確認する。サポートメールは利用者が外部メールアプリから明示送信する
 - それ以外はすべて「収集しない」
 
 ### 7-13. スクリーンショット（2026-08-11 作成）
@@ -2040,15 +2031,15 @@ Phase 9.13 の設計書には「ネイティブ版は `.playback + .mixWithOther
 │   └── gen_alarm_wav.py ← sounds/*.wav を生成する。音を変えるときはJSではなくこれを直す（Phase 9-3）
 ├── manifest.json      ← ホーム画面追加用
 ├── sw.js              ← オフラインキャッシュ（HTTPS公開後に有効）
-├── gas/code.gs        ← スプレッドシート同期用GAS Web Appテンプレ（ユーザー自身のスプレッドシートにコピペして使う。PWA本体からは読み込まれない）
-├── gas/feedback.gs    ← ご意見・ご要望 受付用GAS Web Appテンプレ（受付専用スプレッドシートに貼る。発行URLはapp.jsのFEEDBACK_GAS_URLに埋め込む）
+├── gas/code.gs        ← 廃止済み匿名同期GASの拒否専用コード（既存デプロイ停止用）
+├── gas/feedback.gs    ← 廃止済み匿名フィードバックGASの拒否専用コード（既存デプロイを停止版へ更新するために残す）
 │
 │  ===== ここから下は App Store版（Phase 7）専用 =====
 ├── privacy-policy.html ← プライバシーポリシー（GitHub Pagesで配信）
 ├── support.html        ← サポートページ・FAQ（同上）
 ├── package.json        ← Capacitor の依存とビルドスクリプト
 ├── capacitor.config.json ← appId: com.kanaeru.kintore / webDir: www
-├── build-ios.js        ← 上のPWAソースから www/ を生成（クラウド同期をスタブに差し替え）
+├── build-ios.js        ← 上のPWAソースから www/ を生成し、廃止済みGAS送信の再混入を検査
 ├── codemagic.yaml      ← Codemagic（macOSクラウド）でのiOSビルド定義
 ├── www/                ← build-ios.js の生成物（追跡しない）
 └── ios/                ← Xcodeプロジェクト（cap add ios で生成、コミット対象）
@@ -2126,7 +2117,7 @@ TestFlightの最新iOS実機で確認する。`store/app-review-screen-recording
 0. ~~**v0.10.0のリリース手順**~~ → **完了**（2026-08-09。GASをv4に再デプロイ（`clasp redeploy` でデプロイIDを維持＝URL不変）してから、アプリをGitHub Pagesへpushした）。v0.10.1以降はCSV形式が変わらないためGASの再デプロイ不要、アプリのpushだけでよい。iPhoneではホーム画面アプリを開き直して設定画面下部が **v0.11.1** になっていることを確認する
 1. ~~iPhoneを新URLへ移行~~ / ~~旧リポジトリ `ChihiroHonma/kintore-log` を非公開化~~ → **どちらも完了**（旧リポジトリが `PRIVATE` になっていることを2026-08-07に `gh repo view` で確認）
 2. **Phase 7：App Store公開** → **コード側は完了（2026-08-10）。上記「Phase 7」を参照**
-   - 方針確定：**v1.0＝クラウド同期なし**（iCloudバックアップ＋ローカル通知）で確実に審査を通す → **v1.1＝Googleログイン同期**を追加。PWA版は自分専用として現状維持
+   - 方針確定：**v1.0＝クラウド同期なし**（iCloudバックアップ＋ローカル通知）で確実に審査を通す → 将来追加する場合は**Googleログイン等の認証を前提**とし、匿名GAS同期は復活させない
    - 完了：実装・自動検証・プライバシー/サポートページ・`codemagic.yaml`・Xcodeプロジェクト・アイコン（7-8の1〜9）
    - 完了：アプリ名決定＋App Store Connectでアプリ作成（`筋トレLog` / Apple ID `6800222286`）、スクリーンショット6枚×2サイズ（7-13）、**Codemagicビルド成功＋App Store Connectへアップロード**（2026-08-11 / Index 4 / 7-14）
    - 完了：TestFlight配信（内部テスト「社内テスト」にテスター招待済み。1.0(4)/1.0(5) が配信可能）

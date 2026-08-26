@@ -7,6 +7,29 @@
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
 
+  /* ---- 外部入力の上限とURL検証 ----
+     DOMのmaxlengthだけではCSV取り込みや開発者ツール経由の値を防げないため、
+     保存直前にも同じ上限を適用する。 */
+  var INPUT_LIMITS = {
+    exerciseName: 100,
+    equipment: 100,
+    exerciseNote: 2000,
+    dayMemo: 5000,
+    videoUrl: 2048
+  };
+  function limitedText(value, max) {
+    return String(value == null ? '' : value).slice(0, max);
+  }
+  function safeHttpsUrl(value) {
+    var raw = limitedText(value, INPUT_LIMITS.videoUrl).trim();
+    if (!raw) return '';
+    try {
+      var parsed = new URL(raw);
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return '';
+      return parsed.href;
+    } catch (e) { return ''; }
+  }
+
   /* ---- アプリ内で起きた例外を記録する ----
      ネイティブ版はブラウザの開発者ツールが使えないため、JSがどこかで落ちても
      画面上は「表示が更新されないだけ」になり、実機では何も分からなくなる。
@@ -322,19 +345,20 @@
     infoExId = master ? exId : null;
 
     $('#exModalTitle').innerHTML = partChip(ex.part) + '<b>' + esc(ex.name) + '</b>' + equipTag(ex.equip);
-    var href = ex.video || videoSearchHref(ex);
+    var savedVideo = safeHttpsUrl(ex.video);
+    var href = savedVideo || videoSearchHref(ex);
     var html =
       '<div class="bmap">' + bodySvg(ex.part) + '</div>' +
       '<a id="exVideoBtn" class="btn primary video-btn" href="' + esc(href) + '" target="_blank" rel="noopener">▶ 動きを見る（YouTube）</a>' +
-      '<p class="video-note">' + (ex.video
+      '<p class="video-note">' + (savedVideo
         ? '登録済みの参考動画を開きます　<a class="link" href="' + esc(videoSearchHref(ex)) + '" target="_blank" rel="noopener">検索で探し直す</a>'
         : '「やり方」の検索結果を開きます') + '</p>';
     if (master) {
       html +=
         '<label class="modal-label" for="exVideoInput">参考動画URL（登録すると次回からワンタップで開けます）</label>' +
-        '<input id="exVideoInput" type="url" placeholder="https://www.youtube.com/..." value="' + esc(ex.video || '') + '">' +
+        '<input id="exVideoInput" type="url" inputmode="url" maxlength="' + INPUT_LIMITS.videoUrl + '" placeholder="https://www.youtube.com/..." value="' + esc(savedVideo) + '">' +
         '<label class="modal-label" for="exNoteInput">フォームメモ</label>' +
-        '<textarea id="exNoteInput" rows="2" placeholder="フォームの注意点など（自由記載）">' + esc(ex.note || '') + '</textarea>';
+        '<textarea id="exNoteInput" rows="2" maxlength="' + INPUT_LIMITS.exerciseNote + '" placeholder="フォームの注意点など（自由記載）">' + esc(limitedText(ex.note, INPUT_LIMITS.exerciseNote)) + '</textarea>';
     } else {
       html += '<p class="video-note">（種目リストから削除された種目のため、URL登録はできません）</p>';
     }
@@ -358,12 +382,18 @@
       if (!ex) return;
       if (e.target.id === 'exVideoInput') {
         var v = e.target.value.trim();
-        if (v && !/^https?:\/\//.test(v)) { toast('http(s)から始まるURLを入力してください'); return; }
-        DB.updateExercise(infoExId, { video: v });
-        $('#exVideoBtn').href = v || videoSearchHref(ex);
-        toast(v ? '参考動画を登録しました' : '参考動画の登録を解除しました');
+        var safe = safeHttpsUrl(v);
+        if (v && !safe) {
+          e.target.value = safeHttpsUrl(ex.video);
+          toast('https:// から始まる安全なURLを入力してください');
+          return;
+        }
+        DB.updateExercise(infoExId, { video: safe });
+        e.target.value = safe;
+        $('#exVideoBtn').href = safe || videoSearchHref(ex);
+        toast(safe ? '参考動画を登録しました' : '参考動画の登録を解除しました');
       } else if (e.target.id === 'exNoteInput') {
-        DB.updateExercise(infoExId, { note: e.target.value });
+        DB.updateExercise(infoExId, { note: limitedText(e.target.value, INPUT_LIMITS.exerciseNote) });
         toast('メモを保存しました');
       }
     });
@@ -1068,16 +1098,7 @@
     if (!entries.length) {
       var emptyHtml =
         '<div class="empty"><div class="ph-icon">' + dumbbellSvg() + '</div><p>まだ記録がありません。<br>「＋ 種目を追加」からはじめましょう。</p></div>';
-      // 端末に記録が1件もない＝機種変更やSafari/アプリの開き分けで別の保存場所を見ている可能性が
-      // あるため、クラウドバックアップからの復元導線を出す。
-      // ただしクラウド同期を使っている端末（解除済みまたはURL設定済み）に限る：
-      // 一般公開後の新規ユーザーには意味が分からないボタンのため見せない
-      if (!DB.datesWithData().length && (syncUnlocked() || getGasUrl())) {
-        emptyHtml += '<div class="empty-restore"><button class="btn ghost small" id="cloudRestoreEmptyBtn" type="button">クラウドバックアップから復元</button></div>';
-      }
       $('#entries').innerHTML = emptyHtml;
-      var rBtn = $('#cloudRestoreEmptyBtn');
-      if (rBtn) rBtn.onclick = promptCloudRestore;
     } else {
       $('#entries').innerHTML = entries.map(entryHtml).join('');
     }
@@ -1399,7 +1420,8 @@
     var memoTimer = null;
     $('#dayMemo').addEventListener('input', function (e) {
       clearTimeout(memoTimer);
-      var val = e.target.value;
+      var val = limitedText(e.target.value, INPUT_LIMITS.dayMemo);
+      if (e.target.value !== val) e.target.value = val;
       memoTimer = setTimeout(function () { DB.setMemo(ui.date, val); }, 400);
     });
 
@@ -2002,7 +2024,6 @@
     $('#storageInfo').textContent = (isNativeApp() ? 'この端末に保存中 · 約 ' : 'ブラウザ内に保存中 · 約 ') + DB.sizeKB() + ' KB';
     $('#restoreBackupRow').style.display = hasPreimportBackup() ? '' : 'none';
     renderStorageSection();
-    renderSyncSection();
     renderWeightStepSettings();
     renderThemeSettings();
   }
@@ -2018,243 +2039,6 @@
       '</button>';
     }).join('');
   }
-
-  /* @sync:start
-     ここから @sync:end までは iOS ビルド（build-ios.js）で「何もしないスタブ」に
-     差し替えられ、App Store 版にはクラウド同期が一切入らない（ガイドライン2.3.1対策）。
-     呼び出し側（renderLog の空状態・renderSettings・bindSettings・起動時/visibilitychange）は
-     一切書き換えないため、PWA 版の挙動はこのマーカーを足す前とまったく同じ。
-     ブロック外から呼ばれるのは syncUnlocked / getGasUrl / setGasUrl / checkGasUrl /
-     onVersionTap / renderSyncSection / runSync / autoSync / restoreFromCloud /
-     promptCloudRestore の10個で、build-ios.js のスタブはこの10個を空実装で用意する。
-     ここに関数を足して外から呼ぶ場合は、build-ios.js の STUB にも同名を追加すること。 */
-  /* ================== クラウド同期（スプレッドシート・Phase 4） ==================
-     一般公開時に非エンジニアのユーザーを混乱させないよう、設定画面には常時表示しない。
-     設定画面末尾のバージョン表示を7回連続タップすると解除され、以後はこの端末で常に表示される。 */
-  var SYNC_UNLOCK_KEY = 'kintore_sync_unlocked';
-  var GAS_URL_KEY = 'kintore_gas_url';
-  var LAST_SYNC_KEY = 'kintore_last_sync';
-
-  function syncUnlocked() { try { return localStorage.getItem(SYNC_UNLOCK_KEY) === '1'; } catch (e) { return false; } }
-  function getGasUrl() { try { return localStorage.getItem(GAS_URL_KEY) || ''; } catch (e) { return ''; } }
-  function setGasUrl(url) { try { localStorage.setItem(GAS_URL_KEY, url); } catch (e) { /* noop */ } }
-  function getLastSync() { try { return localStorage.getItem(LAST_SYNC_KEY) || ''; } catch (e) { return ''; } }
-  function setLastSync(iso) { try { localStorage.setItem(LAST_SYNC_KEY, iso); } catch (e) { /* noop */ } }
-
-  /* GAS Web AppのURLかどうかを判定する唯一の窓口。
-     スプレッドシートの閲覧URL（docs.google.com/…）を貼る取り違えが繰り返し起きたため、
-     入力箇所ごとに判定を書かず必ずここを通し、不正なURLはそもそも保存させない。
-     戻り値: { ok: true, url } または { ok: false, error: 表示メッセージ } */
-  function checkGasUrl(input) {
-    var v = String(input || '').trim();
-    if (!v) return { ok: false, error: 'URLが入力されていません。' };
-    if (v.indexOf('docs.google.com') >= 0) {
-      return { ok: false, error: 'それはスプレッドシートを開くためのURLです。\n\n必要なのは Apps Script を「ウェブアプリとしてデプロイ」したときに発行される、\nhttps://script.google.com/macros/s/…/exec\nという形式のURLです。' };
-    }
-    if (v.indexOf('https://script.google.com/') !== 0) {
-      return { ok: false, error: 'バックアップ用のURLは https://script.google.com/ で始まります。\n入力されたURLは形式が違うようです。' };
-    }
-    if (v.slice(-5) !== '/exec') {
-      return { ok: false, error: 'URLの末尾が /exec になっているか確認してください。\n（/dev で終わるURLは開発用のため使えません）' };
-    }
-    return { ok: true, url: v };
-  }
-
-  var versionTapCount = 0;
-  var versionTapTimer = null;
-  function onVersionTap() {
-    clearTimeout(versionTapTimer);
-    versionTapCount++;
-    versionTapTimer = setTimeout(function () { versionTapCount = 0; }, 1500);
-    if (versionTapCount < 7) return;
-    versionTapCount = 0;
-    if (!syncUnlocked()) {
-      try { localStorage.setItem(SYNC_UNLOCK_KEY, '1'); } catch (e) { /* noop */ }
-      toast('クラウド同期を表示しました');
-      renderSyncSection();
-    }
-  }
-
-  function renderSyncSection() {
-    var box = $('#syncSectionContainer');
-    if (!box) return;
-    if (!syncUnlocked()) { box.innerHTML = ''; return; }
-    var pending = DB.dirtyDates().length;
-    var last = getLastSync();
-    var lastText = last ? new Date(last).toLocaleString('ja-JP') : '未同期';
-    var pendingParts = [];
-    if (pending) pendingParts.push(pending + '件');
-    if (DB.exercisesDirty()) pendingParts.push('種目リスト');
-    if (pendingParts.length) lastText += '（未送信 ' + pendingParts.join('・') + '）';
-    box.innerHTML =
-      '<div class="s-section">' +
-        '<h4 class="s-title">クラウド同期</h4>' +
-        '<div class="panel-list">' +
-          '<div class="s-row">' +
-            '<div class="s-main"><b>GAS Web AppのURL</b><small>スプレッドシート連携用に発行したURLを貼り付け</small></div>' +
-          '</div>' +
-          '<div class="s-row">' +
-            '<input id="gasUrlInput" class="sync-url-input" type="text" placeholder="https://script.google.com/macros/s/.../exec" value="' + esc(getGasUrl()) + '">' +
-          '</div>' +
-          '<div class="s-row">' +
-            '<div class="s-main"><b>最終同期</b><small id="syncStatusText">' + esc(lastText) + '・変更は起動時と画面切替時に自動送信</small></div>' +
-            '<button class="link" id="syncNowBtn" type="button">今すぐバックアップ</button>' +
-          '</div>' +
-          '<div class="s-row">' +
-            '<div class="s-main"><b>復元</b><small>スプレッドシートの記録と種目をこの端末へ取り込む</small></div>' +
-            '<button class="link" id="restoreCloudBtn" type="button">スプレッドシートから復元</button>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
-  }
-
-  /* バックアップに毎回同梱する全種目リスト（「種目」シートにマージ保存される） */
-  function collectExerciseRows() {
-    return DB.getExercises().map(function (x) {
-      return [x.part, x.name, x.equip || '', x.video || '', x.note || ''];
-    });
-  }
-
-  /* 削除した種目（「種目」シートからも消すために送る）。
-     シートへの保存はマージ方式のため、削除は明示的に伝えないと反映されない */
-  function collectDeletedExerciseRows() {
-    return DB.deletedExercises().map(function (d) {
-      return [d.part, d.name, d.equip || ''];
-    });
-  }
-
-  var syncInFlight = false; // 起動時の自動送信・画面切替時・手動ボタンの二重送信を防ぐ
-
-  function runSync(opts) {
-    opts = opts || {};
-    var url = getGasUrl();
-    if (!url) { if (!opts.auto) toast('GAS Web AppのURLを入力してください'); return; }
-    var dates = DB.dirtyDates();
-    var exOnly = false;
-    if (!dates.length) {
-      if (DB.exercisesDirty()) {
-        // 種目マスタだけが変更されている：記録行なしで種目リストのみ送る
-        exOnly = true;
-      } else if (opts.auto) {
-        return;
-      } else {
-        // 手動時：未送信の変更が無くても全記録の送り直しを提案する。
-        // 過去に誤ったURL宛の送信を成功扱いにしてしまった等で「送信済み扱いなのに
-        // スプレッドシートに届いていない」状態から回復するための手段
-        var all = DB.datesWithData();
-        if (!all.length) { toast('送信する記録がありません'); return; }
-        if (!confirm('✅ すべてバックアップ済みです（未送信の変更はありません）。\n念のため全記録（' + all.length + '日分）を送り直す場合はOKを押してください。')) return;
-        dates = all;
-      }
-    }
-    if (syncInFlight) return;
-    syncInFlight = true;
-    var payload = {
-      dates: dates,
-      rows: [],
-      exercises: collectExerciseRows(),
-      deletedExercises: collectDeletedExerciseRows()
-    };
-    dates.forEach(function (date) {
-      rowsForDate(date).forEach(function (row) { payload.rows.push(row); });
-    });
-    var btn = $('#syncNowBtn');
-    if (btn && !opts.auto) { btn.disabled = true; btn.textContent = '送信中…'; }
-    fetch(url, {
-      method: 'POST',
-      // GASのWeb Appはプリフライト(OPTIONS)に応答しないため、text/plainで送りCORSプリフライトを回避する
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
-      // 画面切替時の自動送信はページが隠れた後も送信を続行させる（keepaliveはボディ64KB制限
-      // があるため常用せず、差分が小さいこのケースに限って付ける）
-      keepalive: !!opts.keepalive
-    })
-      // JSONを返さない応答（誤ったURL宛など）を成功扱いにしない。
-      // 以前は json() 失敗時に {ok:true} へフォールバックしていたため、届いていないのに
-      // 「送信済み」となり以後の再送が行われなくなる不具合があった
-      .then(function (res) {
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.json();
-      })
-      .then(function (json) {
-        if (json && json.ok === false) throw new Error(json.error || 'sync failed');
-        DB.clearDirty(dates);
-        DB.clearExercisesDirty();
-        DB.clearDeletedExercises(); // 削除がシートへ反映できたので控えを消す（失敗時は残り次回再送）
-        setLastSync(new Date().toISOString());
-        if (!opts.auto) toast(exOnly ? '種目リストをバックアップしました' : 'バックアップが完了しました（' + dates.length + '日分）');
-      })
-      .catch(function () {
-        // 失敗時はdirtyが残るため、次の起動時・画面切替時・手動バックアップで自動的に再送される
-        if (!opts.auto) toast('バックアップに失敗しました。URLや通信環境を確認してください');
-      })
-      .then(function () {
-        syncInFlight = false;
-        if (btn && !opts.auto) { btn.disabled = false; btn.textContent = '今すぐバックアップ'; }
-        renderSyncSection();
-      });
-  }
-
-  /* 未送信の変更（記録または種目リスト）があれば静かにバックアップする（URL未設定・失敗時は何もしない） */
-  function autoSync(opts) {
-    if (!getGasUrl()) return;
-    if (!DB.dirtyDates().length && !DB.exercisesDirty()) return;
-    runSync({ auto: true, keepalive: !!(opts && opts.keepalive) });
-  }
-
-  /* スプレッドシートから全記録＋種目リストを取り込む */
-  function restoreFromCloud() {
-    var url = getGasUrl();
-    if (!url) { toast('GAS Web AppのURLを入力してください'); return; }
-    var btn = $('#restoreCloudBtn');
-    if (btn) { btn.disabled = true; btn.textContent = '読み込み中…'; }
-    var done = function () {
-      if (btn) { btn.disabled = false; btn.textContent = 'スプレッドシートから復元'; }
-    };
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'restore' })
-    })
-      .then(function (res) { return res.json(); })
-      .then(function (json) {
-        if (!json || json.ok === false) throw new Error((json && json.error) || 'restore failed');
-        var rows = json.rows || [];
-        if (!rows.length) { toast('スプレッドシートに記録がありません'); done(); return; }
-        // 記録行はCSVインポートと同じ17列形式なので、ヘッダー行を先頭に足して取り込み処理を流用する
-        var data = buildImportData([ROW_HEAD].concat(rows));
-        if (data.error) { toast(data.error); done(); return; }
-        if (!data.dateOrder.length) { toast('取り込めるデータが見つかりませんでした'); done(); return; }
-        var ok = confirm('クラウドバックアップから ' + data.dateOrder.length + '日分・' + data.rowCount + '件を復元します。\n対象の日の記録は置き換わります。よろしいですか？');
-        if (!ok) { done(); return; }
-        var backupJSON = DB.exportStateJSON();
-        try {
-          DB.applyImport(data.dateOrder, data.byDate);
-          DB.importExercises((json.exercises || []).map(function (r) {
-            return { part: String(r[0] || ''), name: String(r[1] || ''), equip: String(r[2] || ''), video: String(r[3] || ''), note: String(r[4] || '') };
-          }));
-        } catch (e) {
-          if (backupJSON) DB.restoreStateJSON(backupJSON);
-          toast('復元に失敗したため元に戻しました');
-          done();
-          return;
-        }
-        if (backupJSON) {
-          try { localStorage.setItem(PREIMPORT_BACKUP_KEY, backupJSON); } catch (e) { /* noop */ }
-        }
-        DB.clearDirty(data.dateOrder); // スプシ由来のデータはスプシと一致しているため再送不要
-        setLastSync(new Date().toISOString());
-        renderLog();
-        renderSettings();
-        toast(data.dateOrder.length + '日分の記録を復元しました');
-        done();
-      })
-      .catch(function () {
-        toast('復元に失敗しました。URLや通信環境を確認してください');
-        done();
-      });
-  }
-  /* @sync:end */
 
   /* ================== ネイティブ連携（Capacitor / App Store版でのみ動く） ==================
      PWA（ブラウザ）には window.Capacitor が無いため、この節の関数はすべて何もしないで返る。
@@ -3027,8 +2811,8 @@
   }
 
   /* ---- 設定画面「データの保存」 ----
-     App Store版にはクラウド同期が無いぶん、記録がどこにあり何で守られるのかを設定画面で示す。
-     PWA版ではクラウド同期セクションがその役目を果たすため、ここは空のまま。 */
+     記録がどこにあり何で守られるのかを設定画面で示す。
+     PWA版はブラウザ内保存とCSV書き出しを利用するため、ネイティブ専用欄は表示しない。 */
   function renderStorageSection() {
     var box = $('#storageSectionContainer');
     if (!box) return;
@@ -3064,64 +2848,6 @@
     if (el) el.textContent = nativeBackupAtText();
   }
 
-  /* ================== ご意見・ご要望（一般公開向けサポート窓口） ==================
-     受付専用GAS（gas/feedback.gs）に送信する。バックアップ用GASとは別物で、
-     このURLは公開前提の受付窓口のためコードに直接埋め込む（書き込み専用・記録データとは無関係）。
-     空文字の間はサポートセクション自体を表示しない */
-  var FEEDBACK_GAS_URL = 'https://script.google.com/macros/s/AKfycbzIuw4o_FtZbpoR3iRoFbqwNJPKU9V41hNXxw6u98Pfavmt3B7atETA2Fcju9jUjlnL2Q/exec';
-  var FB_LIMIT_PER_DAY = 5;
-
-  function appVersion() {
-    var el = $('.version');
-    var m = el && el.textContent.match(/v[\d.]+/);
-    return m ? m[0] : '';
-  }
-
-  function bindFeedback() {
-    var section = $('#supportSection');
-    if (!section) return;
-    if (!FEEDBACK_GAS_URL) { section.style.display = 'none'; return; }
-
-    $('#fbSendBtn').onclick = function () {
-      var text = $('#fbText').value.trim();
-      if (!text) { toast('内容を入力してください'); return; }
-      var countKey = 'kintore_fb_' + DB.todayStr();
-      var count = 0;
-      try { count = parseInt(localStorage.getItem(countKey), 10) || 0; } catch (e) { /* noop */ }
-      if (count >= FB_LIMIT_PER_DAY) { toast('本日の送信回数の上限に達しました。また明日お願いします'); return; }
-      var btn = $('#fbSendBtn');
-      btn.disabled = true;
-      btn.textContent = '送信中…';
-      fetch(FEEDBACK_GAS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          text: text.slice(0, 1000),
-          email: $('#fbEmail').value.trim().slice(0, 200),
-          version: appVersion()
-        })
-      })
-        .then(function (res) {
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          return res.json();
-        })
-        .then(function (json) {
-          if (json && json.ok === false) throw new Error(json.error || 'failed');
-          try { localStorage.setItem(countKey, String(count + 1)); } catch (e) { /* noop */ }
-          $('#fbText').value = '';
-          $('#fbEmail').value = '';
-          toast('ご意見ありがとうございました！今後の改善の参考にさせていただきます。');
-        })
-        .catch(function () {
-          toast('送信に失敗しました。通信環境をご確認のうえ、時間をおいてお試しください');
-        })
-        .then(function () {
-          btn.disabled = false;
-          btn.textContent = '送信する';
-        });
-    };
-  }
-
   /* App Storeの商品ページにあるレビュー入力画面を開く。
      ボタン操作には表示回数制限のあるレビュー依頼APIを使わず、Appleが案内している
      action=write-review 付きの常設リンクを使う。ネイティブ版は外部のApp Storeで開き、
@@ -3147,52 +2873,8 @@
     });
   }
 
-  /* @sync:start */
-  /* 記録が空の端末からの復元導線（記録タブの空状態から。隠し機能の解除状態と独立して使える） */
-  function promptCloudRestore() {
-    if (!getGasUrl()) {
-      var url = prompt('バックアップ用 GAS Web AppのURLを入力してください\n（https://script.google.com/macros/s/…/exec）\n※スプレッドシートを開くURLではありません');
-      if (url === null) return;
-      var chk = checkGasUrl(url);
-      if (!chk.ok) { alert(chk.error); return; }
-      setGasUrl(chk.url);
-      renderSyncSection();
-    }
-    restoreFromCloud();
-  }
-  /* @sync:end */
 
   function bindSettings() {
-    var versionEl = $('.version');
-    if (versionEl) versionEl.addEventListener('click', onVersionTap);
-
-    /* @sync:start
-       同期セクション（#syncSectionContainer）のイベント登録。中身を描画するのは renderSyncSection で、
-       iOS版ではそれがスタブになり常に空のため、この登録も丸ごと不要になる。
-       ここを残すと動かないコードだけが残り、ガイドライン2.3.1（休眠機能）の指摘対象になり得る。 */
-    $('#syncSectionContainer').addEventListener('change', function (e) {
-      if (e.target.id === 'gasUrlInput') {
-        var v = e.target.value.trim();
-        // 空欄はクラウド同期の解除として扱う
-        if (!v) { setGasUrl(''); toast('バックアップ先URLを消去しました'); return; }
-        // 貼り間違いは保存させない（以前は警告を出しつつ保存していたため、
-        // 誤ったURL宛に送り続けてバックアップできない状態に気づけなかった）
-        var chk = checkGasUrl(v);
-        if (!chk.ok) {
-          alert(chk.error);
-          e.target.value = getGasUrl();  // 保存済みの正しいURLを保つ
-          return;
-        }
-        setGasUrl(chk.url);
-        toast('バックアップ先URLを保存しました');
-      }
-    });
-    $('#syncSectionContainer').addEventListener('click', function (e) {
-      if (e.target.id === 'syncNowBtn') runSync();
-      if (e.target.id === 'restoreCloudBtn') restoreFromCloud();
-    });
-    /* @sync:end */
-
     $('#weightStepList').addEventListener('click', function (e) {
       var row = e.target.closest('[data-wstep]');
       if (!row) return;
@@ -3208,10 +2890,10 @@
     });
 
     $('#addExBtn').onclick = function () {
-      var name = $('#newExName').value.trim();
+      var name = limitedText($('#newExName').value, INPUT_LIMITS.exerciseName).trim();
       if (!name) { toast('種目名を入力してください'); return; }
       var part = $('#newExPart').value;
-      var equip = $('#newExEquip').value;
+      var equip = limitedText($('#newExEquip').value, INPUT_LIMITS.equipment);
       if (DB.findExercise(name, part, equip)) {
         toast('「' + name + (equip ? '（' + equip + '）' : '') + '」はすでに登録されています');
         return;
@@ -3245,7 +2927,9 @@
       } else if (btn.dataset.action === 'rename') {
         var name = prompt('新しい種目名', ex.name);
         if (name && name.trim()) {
-          DB.renameExercise(ex.id, name.trim());
+          name = limitedText(name, INPUT_LIMITS.exerciseName).trim();
+          if (!name) { toast('種目名を入力してください'); return; }
+          DB.renameExercise(ex.id, name);
           renderSettings();
         }
       } else if (btn.dataset.action === 'del-ex') {
@@ -3293,8 +2977,8 @@
     };
   }
 
-  /* ================== CSVエクスポート・スプレッドシート同期 共通の行データ ================== */
-  /* 強度(v0.10.0で追加)は末尾に足す。途中に挿すとスプレッドシートに既に書かれた行と列がずれるため */
+  /* ================== CSVエクスポート用の行データ ================== */
+  /* 強度(v0.10.0で追加)は既存CSVとの互換性を保つため末尾に置く */
   var ROW_HEAD = ['日付', '曜日', '部位', '種目', '器具', 'セット',
     '重量kg', '回数', 'ボリュームkg',
     '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ', '強度'];
@@ -3332,7 +3016,11 @@
     var dates = DB.datesWithData();
     if (!dates.length) { toast('書き出す記録がありません'); return; }
     var csv = function (v) {
+      var isText = typeof v === 'string';
       v = String(v == null ? '' : v);
+      // Excel等が「=」「+」「-」「@」始まりの文字列を数式として実行するのを防ぐ。
+      // 数値型の負数はそのまま書き出し、ユーザーが入力した文字列だけを無害化する。
+      if (isText && /^[\t\r\n ]*[=+\-@]/.test(v)) v = "'" + v;
       return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
     };
     var lines = [ROW_HEAD.join(',')];
@@ -3355,10 +3043,41 @@
     'w', 'r', 'vol', 't', 'ts', 'd', 'sp', 'inc', 'cal', 'hr', 'memo', 'z'];
   var IMPORT_HEADER_KEY = ROW_HEAD.reduce(function (m, h, i) { m[h] = IMPORT_KEYS[i]; return m; }, {});
   var PREIMPORT_BACKUP_KEY = 'kintore_v1_preimport_backup';
+  var CSV_LIMITS = {
+    bytes: 2 * 1024 * 1024,
+    rows: 20000,
+    columns: 64,
+    field: 5000,
+    dates: 3650,
+    setNo: 200
+  };
+
+  function csvError(message) { return new Error(message); }
+
+  function validImportDate(value) {
+    var text = String(value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
+    var d = new Date(text + 'T00:00:00Z');
+    return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === text ? text : '';
+  }
+
+  function importNumber(value, label, rowNo, min, max) {
+    var text = String(value == null ? '' : value).trim();
+    if (!text) return '';
+    if (!/^-?(?:\d+\.?\d*|\.\d+)(?:e[+\-]?\d+)?$/i.test(text)) {
+      throw csvError(rowNo + '行目の' + label + 'が数値ではありません');
+    }
+    var n = Number(text);
+    if (!isFinite(n) || n < min || n > max) {
+      throw csvError(rowNo + '行目の' + label + 'が許容範囲外です');
+    }
+    return n;
+  }
 
   /* CSVテキストを2次元配列にパースする（引用符内のカンマ・改行・""エスケープに対応） */
   function parseCSV(text) {
     text = String(text || '').replace(/^﻿/, '');
+    if (text.length > CSV_LIMITS.bytes) throw csvError('CSVファイルが大きすぎます（上限2MB）');
     var rows = [], row = [], field = '', inQuotes = false;
     for (var i = 0; i < text.length; i++) {
       var c = text[i];
@@ -3366,26 +3085,27 @@
         if (c === '"') {
           if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
         } else { field += c; }
+        if (field.length > CSV_LIMITS.field) throw csvError('CSV内の1項目が長すぎます');
       } else if (c === '"') {
         inQuotes = true;
       } else if (c === ',') {
         row.push(field); field = '';
+        if (row.length > CSV_LIMITS.columns) throw csvError('CSVの列数が多すぎます');
       } else if (c === '\r') {
         /* 改行はこの次の\nで処理する */
       } else if (c === '\n') {
         row.push(field); field = ''; rows.push(row); row = [];
+        if (rows.length > CSV_LIMITS.rows) throw csvError('CSVの行数が多すぎます（上限20000行）');
       } else {
         field += c;
+        if (field.length > CSV_LIMITS.field) throw csvError('CSV内の1項目が長すぎます');
       }
     }
+    if (inQuotes) throw csvError('CSVの引用符が閉じられていません');
     if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    if (row.length > CSV_LIMITS.columns) throw csvError('CSVの列数が多すぎます');
+    if (rows.length > CSV_LIMITS.rows) throw csvError('CSVの行数が多すぎます（上限20000行）');
     return rows.filter(function (r) { return !(r.length === 1 && r[0] === ''); });
-  }
-
-  function numOrEmpty(v) {
-    if (v === '' || v == null) return '';
-    var n = parseFloat(v);
-    return isNaN(n) ? '' : n;
   }
 
   /* パース済み行 → 日付ごと・種目ごとにグルーピングする。DB.applyImportにそのまま渡せる形にする */
@@ -3401,22 +3121,46 @@
       if (!r || !r.length) continue;
       var rec = {};
       keys.forEach(function (k, idx) { if (k) rec[k] = (r[idx] !== undefined) ? r[idx] : ''; });
-      if (!rec.date || !rec.part || !rec.name) continue;
+      var rowNo = i + 1;
+      var date = validImportDate(rec.date);
+      var part = limitedText(rec.part, 20).trim();
+      var name = limitedText(rec.name, INPUT_LIMITS.exerciseName).trim();
+      var equip = limitedText(rec.equip, INPUT_LIMITS.equipment).trim();
+      if (!date || !part || !name) throw csvError(rowNo + '行目の日付・部位・種目を確認してください');
+      if (DB.PARTS.indexOf(part) < 0) throw csvError(rowNo + '行目の部位が不正です');
       rowCount++;
-      if (!byDate[rec.date]) { byDate[rec.date] = { entries: {}, order: [], memo: '' }; dateOrder.push(rec.date); }
-      var dayObj = byDate[rec.date];
-      if (rec.memo) dayObj.memo = rec.memo;
-      var entryKey = rec.part + '||' + rec.name + '||' + (rec.equip || '');
+      if (!byDate[date]) {
+        if (dateOrder.length >= CSV_LIMITS.dates) throw csvError('CSVに含まれる日付が多すぎます（上限3650日）');
+        byDate[date] = { entries: {}, order: [], memo: '' };
+        dateOrder.push(date);
+      }
+      var dayObj = byDate[date];
+      if (rec.memo) dayObj.memo = limitedText(rec.memo, INPUT_LIMITS.dayMemo);
+      var entryKey = part + '||' + name + '||' + equip;
       if (!dayObj.entries[entryKey]) {
-        dayObj.entries[entryKey] = { part: rec.part, name: rec.name, equip: rec.equip || '', sets: [] };
+        dayObj.entries[entryKey] = { part: part, name: name, equip: equip, sets: [] };
         dayObj.order.push(entryKey);
       }
       var entryObj = dayObj.entries[entryKey];
-      var setNo = parseInt(rec.setNo, 10);
-      if (!setNo || setNo < 1) setNo = entryObj.sets.length + 1;
-      var setObj = (rec.part === CARDIO_PART)
-        ? { t: numOrEmpty(rec.t), ts: numOrEmpty(rec.ts), d: numOrEmpty(rec.d), sp: numOrEmpty(rec.sp), inc: numOrEmpty(rec.inc), cal: numOrEmpty(rec.cal), hr: numOrEmpty(rec.hr), z: zoneFromCsv(rec.z) }
-        : { w: numOrEmpty(rec.w), r: numOrEmpty(rec.r) };
+      var setNoText = String(rec.setNo == null ? '' : rec.setNo).trim();
+      var setNo = setNoText ? importNumber(setNoText, 'セット番号', rowNo, 1, CSV_LIMITS.setNo) : entryObj.sets.length + 1;
+      if (Math.floor(setNo) !== setNo) throw csvError(rowNo + '行目のセット番号は整数で入力してください');
+      if (setNo > CSV_LIMITS.setNo) throw csvError(rowNo + '行目のセット番号が大きすぎます（上限200）');
+      var setObj = (part === CARDIO_PART)
+        ? {
+            t: importNumber(rec.t, '時間', rowNo, 0, 100000),
+            ts: importNumber(rec.ts, '秒', rowNo, 0, 59),
+            d: importNumber(rec.d, '距離', rowNo, 0, 1000000),
+            sp: importNumber(rec.sp, '速度', rowNo, 0, 1000),
+            inc: importNumber(rec.inc, '傾斜', rowNo, -100, 1000),
+            cal: importNumber(rec.cal, 'カロリー', rowNo, 0, 1000000000),
+            hr: importNumber(rec.hr, '心拍数', rowNo, 0, 400),
+            z: zoneFromCsv(limitedText(rec.z, 20))
+          }
+        : {
+            w: importNumber(rec.w, '重量', rowNo, 0, 10000),
+            r: importNumber(rec.r, '回数', rowNo, 0, 100000)
+          };
       entryObj.sets[setNo - 1] = setObj;
     }
     return { dateOrder: dateOrder, byDate: byDate, rowCount: rowCount };
@@ -3427,13 +3171,18 @@
   }
 
   function importCSVFile(file) {
+    if (!file || file.size > CSV_LIMITS.bytes) {
+      toast('CSVファイルが大きすぎます（上限2MB）');
+      return;
+    }
+    if (file.size === 0) { toast('CSVファイルが空です'); return; }
     var reader = new FileReader();
     reader.onload = function () {
       var data;
       try {
         data = buildImportData(parseCSV(reader.result));
       } catch (e) {
-        toast('CSVの読み込みに失敗しました');
+        toast((e && e.message) ? e.message : 'CSVの読み込みに失敗しました');
         return;
       }
       if (data.error) { toast(data.error); return; }
@@ -4508,7 +4257,6 @@
   bindSheet();
   bindHistory();
   bindSettings();
-  bindFeedback();
   bindAppReview();
   bindExInfo();
   bindDrum();
@@ -4534,12 +4282,10 @@
   // 通知音のコピーは起動を妨げないよう少し遅らせる（初回だけ約1.2MB書き出す）
   setTimeout(function () { ensureNotificationSounds(); }, 1500);
 
-  // 自動バックアップ：起動直後（描画を妨げないよう少し遅らせる）と、
-  // アプリを閉じる・他アプリへ切り替えるとき（hidden）に未送信の変更を送る
-  setTimeout(function () { autoSync(); writeNativeBackup(); }, 2000);
+  // 端末内バックアップ：起動直後は描画を妨げないよう少し遅らせる。
+  setTimeout(function () { writeNativeBackup(); }, 2000);
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState !== 'hidden') return;
-    autoSync({ keepalive: true });
     writeNativeBackup();
     /* ここから先はJSが止まる。動作中のタイマーがあれば予約を出し直しておく。
        開始時の予約が何らかの理由でOSに届いていなくても、この一手で拾える

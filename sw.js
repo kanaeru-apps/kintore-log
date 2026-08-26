@@ -1,12 +1,14 @@
 /* 筋トレLog Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v61';
+const CACHE = 'kintore-v62';
 const ASSETS = [
   './',
   './index.html',
   './css/style.css',
+  './js/theme-init.js',
   './js/db.js',
   './js/app.js',
   './js/charts.js',
+  './js/register-sw.js',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',

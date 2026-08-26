@@ -3,19 +3,28 @@
   "version": "1.0.0",
   "description": "筋トレLog - iOS app (Capacitor wrapper for the PWA)",
   "private": true,
+  "engines": {
+    "node": "24.14.1",
+    "npm": "11.11.0"
+  },
   "scripts": {
     "build": "node build-ios.js",
-    "sync": "node build-ios.js && cap sync ios"
+    "sync": "node build-ios.js && cap sync ios",
+    "security:scan": "node tools/security-check.js",
+    "check:syntax": "node --check build-ios.js && node --check sw.js && node --check js/theme-init.js && node --check js/register-sw.js && node --check js/db.js && node --check js/app.js && node --check js/charts.js",
+    "verify": "npm run check:syntax && npm run security:scan && npm run build"
   },
   "dependencies": {
-    "@capacitor/cli": "^8.5.0",
     "@capacitor/core": "^8.5.0",
-    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/filesystem": "^8.1.3",
     "@capacitor/haptics": "^8.0.2",
     "@capacitor/ios": "^8.5.0",
-    "@capacitor/local-notifications": "^8.2.1"
+    "@capacitor/local-notifications": "^8.3.1"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5"
+    "@capacitor/cli": "^8.5.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

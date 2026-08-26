@@ -1122,24 +1122,6 @@ button { cursor: pointer; }
 }
 .sync-url-input:focus { outline: none; border-color: var(--accent); }
 
-/* ご意見・ご要望フォーム */
-.fb-col { flex-direction: column; align-items: stretch; gap: 8px; }
-.fb-col textarea {
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-size: 14px;
-  color: var(--text);
-  resize: vertical;
-}
-.fb-col textarea:focus { outline: none; border-color: var(--accent); }
-.fb-label { font-size: 12px; color: var(--dim); }
-.fb-note { font-size: 11px; color: var(--faint); margin: 0; }
-.fb-col .btn { align-self: flex-end; }
 .add-ex-row { display: flex; gap: 8px; }
 .add-ex-row select {
   flex: 1;

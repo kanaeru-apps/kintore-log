@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'">
 <title>筋トレLog</title>
 <meta name="theme-color" content="#0b0c0f">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -17,26 +18,11 @@
      プライバシーポリシーの説明を実際の挙動に一致させる。 -->
 <!-- ?v= はバージョン更新のたびに変える：index.htmlが新しければJS/CSSも必ず新しいものが
      取得され、GitHub PagesのHTTPキャッシュ(10分)による新旧混在を防ぐ -->
-<link rel="stylesheet" href="css/style.css?v=0.13.17">
 <!-- テーマの初期設定。CSSより先に <html data-theme> を決めておかないと、起動の一瞬だけ
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
-<script>
-(function () {
-  var pref = 'system';
-  try {
-    var v = localStorage.getItem('kintore_theme');
-    if (v === 'system' || v === 'light' || v === 'dark') pref = v;
-  } catch (e) { /* プライベートモード等で読めなくても既定で動く */ }
-  var actual = pref;
-  if (pref === 'system') {
-    actual = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
-  }
-  document.documentElement.setAttribute('data-theme', actual);
-  var m = document.querySelector('meta[name="theme-color"]');
-  if (m) m.setAttribute('content', actual === 'light' ? '#f2f3f5' : '#0b0c0f');
-})();
-</script>
+<script src="js/theme-init.js?v=0.13.17"></script>
+<link rel="stylesheet" href="css/style.css?v=0.13.17">
 </head>
 <body>
 <div id="app">
@@ -58,7 +44,7 @@
       <div id="entries"></div>
 
       <button id="addExerciseBtn" class="btn primary">＋ 種目を追加</button>
-      <textarea id="dayMemo" class="memo" rows="2" placeholder="メモ（自由記載）"></textarea>
+      <textarea id="dayMemo" class="memo" rows="2" maxlength="5000" placeholder="メモ（自由記載）"></textarea>
     </section>
 
     <!-- ============ 履歴 ============ -->
@@ -204,7 +190,7 @@
       <div class="s-section">
         <h4 class="s-title">種目管理</h4>
         <div class="add-ex-form">
-          <input id="newExName" type="text" placeholder="新しい種目名">
+          <input id="newExName" type="text" maxlength="100" placeholder="新しい種目名">
           <div class="add-ex-row">
             <select id="newExPart" aria-label="部位"></select>
             <select id="newExEquip" aria-label="器具"></select>
@@ -260,19 +246,13 @@
         </div>
       </div>
 
-      <!-- サポート：ご意見・ご要望フォーム（受付用GAS URL未設定のビルドでは app.js が非表示にする） -->
+      <!-- サポート：外部GASへ自動送信せず、利用者のメールアプリを開く -->
       <div class="s-section" id="supportSection">
         <h4 class="s-title">サポート</h4>
         <div class="panel-list">
           <div class="s-row">
-            <div class="s-main"><b>ご意見・ご要望</b><small>不具合のご報告や改善のご要望をお送りください</small></div>
-          </div>
-          <div class="s-row fb-col">
-            <textarea id="fbText" maxlength="1000" rows="4" placeholder="アプリの改善に活用させていただきます。お気軽にどうぞ"></textarea>
-            <label class="fb-label" for="fbEmail">メールアドレス（任意・空欄OK)</label>
-            <input id="fbEmail" class="sync-url-input" type="text" inputmode="email" maxlength="200" placeholder="example@email.com" autocomplete="email">
-            <p class="fb-note">内容についてこちらからご連絡することがあります。</p>
-            <button id="fbSendBtn" class="btn primary small" type="button">送信する</button>
+            <div class="s-main"><b>メールでお問い合わせ</b><small>メールアプリが開きます。アプリから内容が自動送信されることはありません</small></div>
+            <a class="link" href="mailto:support.kanaeru@gmail.com">メールを開く</a>
           </div>
         </div>
       </div>
@@ -301,8 +281,6 @@
           </div>
         </div>
       </div>
-
-      <div id="syncSectionContainer"></div>
 
       <p class="version">筋トレLog v0.13.17 — Phase 8</p>
     </section>
@@ -586,10 +564,6 @@
 <script src="js/db.js?v=0.13.17"></script>
 <script src="js/app.js?v=0.13.17"></script>
 <script src="js/charts.js?v=0.13.17"></script>
-<script>
-if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
-  navigator.serviceWorker.register('./sw.js').catch(function () {});
-}
-</script>
+<script src="js/register-sw.js?v=0.13.17"></script>
 </body>
 </html>
