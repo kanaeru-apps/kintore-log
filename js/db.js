@@ -522,21 +522,33 @@ var DB = (function () {
       });
       save();
     },
-    /* クラウド復元用：種目リストを取り込む。名前+部位+器具が一致する既存種目はそのまま使い、
-       無いものだけ追加する。video/noteはローカルが空の場合のみ設定（ローカルの編集を上書きしない） */
-    importExercises: function (list) {
+    /* 種目リストを取り込む。名前+部位+器具が一致する既存種目はそのまま使い、
+       無いものだけ追加する。overwriteMetadata=true はバックアップ復元用で、
+       参考動画URL・フォームメモの空欄も含めてバックアップの内容に戻す。 */
+    importExercises: function (list, overwriteMetadata) {
+      var changed = false;
       (list || []).forEach(function (d) {
         if (!d || !d.name || !d.part) return;
         var ex = findExercise(d.name, d.part, d.equip || '');
         if (!ex) {
           ex = { id: uid(), name: d.name, part: d.part, equip: d.equip || '' };
           state.exercises.push(ex);
+          changed = true;
         }
-        // 復元はスプレッドシートを正として取り込む操作なので、未送信の削除の控えは取り消す
+        // 復元した種目が、過去の削除控えによって後から消されないようにする
         unmarkExerciseDeleted(d.part, d.name, d.equip || '');
-        if (d.video && !ex.video) ex.video = d.video;
-        if (d.note && !ex.note) ex.note = d.note;
+        if (overwriteMetadata) {
+          var video = d.video || '';
+          var note = d.note || '';
+          if ((ex.video || '') !== video || (ex.note || '') !== note) changed = true;
+          ex.video = video;
+          ex.note = note;
+        } else {
+          if (d.video && !ex.video) { ex.video = d.video; changed = true; }
+          if (d.note && !ex.note) { ex.note = d.note; changed = true; }
+        }
       });
+      if (changed) markExercisesDirty();
       save();
     },
 

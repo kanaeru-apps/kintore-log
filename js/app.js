@@ -2978,11 +2978,16 @@
   }
 
   /* ================== CSVエクスポート用の行データ ================== */
-  /* 強度(v0.10.0で追加)は既存CSVとの互換性を保つため末尾に置く */
+  /* 既存CSVとの互換性を保つため、新しい列は常に末尾へ追加する。
+     v0.13.18では、記録に一度も使っていない種目も含めてマスターを復元できるよう、
+     データ種別・参考動画URL・フォームメモを追加した。 */
   var ROW_HEAD = ['日付', '曜日', '部位', '種目', '器具', 'セット',
     '重量kg', '回数', 'ボリュームkg',
-    '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ', '強度'];
-  /* 指定日の記録を18列の行配列（ROW_HEADと同じ並び）に変換する。記録が無ければ空配列 */
+    '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ', '強度',
+    'データ種別', '参考動画URL', 'フォームメモ'];
+  var CSV_ROW_WORKOUT = '記録';
+  var CSV_ROW_EXERCISE = '種目マスター';
+  /* 指定日の記録をROW_HEADと同じ並びの行配列に変換する。記録が無ければ空配列 */
   function rowsForDate(date) {
     var w = DB.getWorkout(date);
     if (!w) return [];
@@ -3005,16 +3010,30 @@
           cardio ? val(s.cal) : '',
           cardio ? val(s.hr) : '',
           w.memo || '',
-          cardio ? zoneCsv(zoneOf(s)) : ''
+          cardio ? zoneCsv(zoneOf(s)) : '',
+          CSV_ROW_WORKOUT, '', ''
         ]);
       });
     });
     return rows;
   }
 
+  /* 種目マスターは記録行と分けて1種目1行にする。
+     これにより、まだ一度も記録に追加していない種目のURL・メモもバックアップできる。 */
+  function rowsForExerciseMaster() {
+    return DB.getExercises().map(function (ex) {
+      return [
+        '', '', ex.part, ex.name, ex.equip || '',
+        '', '', '', '', '', '', '', '', '', '', '', '', '',
+        CSV_ROW_EXERCISE, safeHttpsUrl(ex.video), limitedText(ex.note, INPUT_LIMITS.exerciseNote)
+      ];
+    });
+  }
+
   function exportCSV() {
     var dates = DB.datesWithData();
-    if (!dates.length) { toast('書き出す記録がありません'); return; }
+    var exerciseRows = rowsForExerciseMaster();
+    if (!dates.length && !exerciseRows.length) { toast('書き出すデータがありません'); return; }
     var csv = function (v) {
       var isText = typeof v === 'string';
       v = String(v == null ? '' : v);
@@ -3027,6 +3046,7 @@
     dates.forEach(function (date) {
       rowsForDate(date).forEach(function (row) { lines.push(row.map(csv).join(',')); });
     });
+    exerciseRows.forEach(function (row) { lines.push(row.map(csv).join(',')); });
     var blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv' }); // BOM付きでExcel文字化け防止
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -3034,13 +3054,14 @@
     document.body.appendChild(a);
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-    toast('CSVを書き出しました');
+    toast('記録と種目マスターをCSVに書き出しました');
   }
 
   /* ================== CSVインポート ================== */
   /* ROW_HEADの見出し文字列 → 内部キー。列の並びが変わっていてもヘッダー名で判定する */
   var IMPORT_KEYS = ['date', 'wd', 'part', 'name', 'equip', 'setNo',
-    'w', 'r', 'vol', 't', 'ts', 'd', 'sp', 'inc', 'cal', 'hr', 'memo', 'z'];
+    'w', 'r', 'vol', 't', 'ts', 'd', 'sp', 'inc', 'cal', 'hr', 'memo', 'z',
+    'rowType', 'video', 'exerciseNote'];
   var IMPORT_HEADER_KEY = ROW_HEAD.reduce(function (m, h, i) { m[h] = IMPORT_KEYS[i]; return m; }, {});
   var PREIMPORT_BACKUP_KEY = 'kintore_v1_preimport_backup';
   var CSV_LIMITS = {
@@ -3108,7 +3129,8 @@
     return rows.filter(function (r) { return !(r.length === 1 && r[0] === ''); });
   }
 
-  /* パース済み行 → 日付ごと・種目ごとにグルーピングする。DB.applyImportにそのまま渡せる形にする */
+  /* パース済み行 → 日付ごとの記録と種目マスターに分ける。
+     v0.13.17以前のCSVにはデータ種別列が無いため、空欄は従来どおり記録行として扱う。 */
   function buildImportData(rows) {
     if (!rows || rows.length < 2) return { dateOrder: [], byDate: {}, rowCount: 0, error: 'CSVにデータ行がありません' };
     var keys = rows[0].map(function (h) { return IMPORT_HEADER_KEY[String(h).trim()] || null; });
@@ -3116,6 +3138,7 @@
       return { dateOrder: [], byDate: {}, rowCount: 0, error: 'CSVの形式が正しくありません（日付・部位・種目の列が見つかりません）' };
     }
     var byDate = {}, dateOrder = [], rowCount = 0;
+    var exercises = [], exerciseIndex = {};
     for (var i = 1; i < rows.length; i++) {
       var r = rows[i];
       if (!r || !r.length) continue;
@@ -3126,8 +3149,35 @@
       var part = limitedText(rec.part, 20).trim();
       var name = limitedText(rec.name, INPUT_LIMITS.exerciseName).trim();
       var equip = limitedText(rec.equip, INPUT_LIMITS.equipment).trim();
-      if (!date || !part || !name) throw csvError(rowNo + '行目の日付・部位・種目を確認してください');
+      var rowType = limitedText(rec.rowType, 20).trim();
+      if (rowType && rowType !== CSV_ROW_WORKOUT && rowType !== CSV_ROW_EXERCISE) {
+        throw csvError(rowNo + '行目のデータ種別が不正です');
+      }
+      if (!part || !name) throw csvError(rowNo + '行目の部位・種目を確認してください');
       if (DB.PARTS.indexOf(part) < 0) throw csvError(rowNo + '行目の部位が不正です');
+
+      if (rowType === CSV_ROW_EXERCISE) {
+        var videoRaw = limitedText(rec.video, INPUT_LIMITS.videoUrl).trim();
+        var video = safeHttpsUrl(videoRaw);
+        if (videoRaw && !video) throw csvError(rowNo + '行目の参考動画URLはhttps://から始まるURLにしてください');
+        var exerciseKey = JSON.stringify([part, name, equip]);
+        var master = {
+          part: part,
+          name: name,
+          equip: equip,
+          video: video,
+          note: limitedText(rec.exerciseNote, INPUT_LIMITS.exerciseNote)
+        };
+        if (exerciseIndex[exerciseKey] === undefined) {
+          exerciseIndex[exerciseKey] = exercises.length;
+          exercises.push(master);
+        } else {
+          exercises[exerciseIndex[exerciseKey]] = master;
+        }
+        continue;
+      }
+
+      if (!date) throw csvError(rowNo + '行目の日付を確認してください');
       rowCount++;
       if (!byDate[date]) {
         if (dateOrder.length >= CSV_LIMITS.dates) throw csvError('CSVに含まれる日付が多すぎます（上限3650日）');
@@ -3136,7 +3186,7 @@
       }
       var dayObj = byDate[date];
       if (rec.memo) dayObj.memo = limitedText(rec.memo, INPUT_LIMITS.dayMemo);
-      var entryKey = part + '||' + name + '||' + equip;
+      var entryKey = JSON.stringify([part, name, equip]);
       if (!dayObj.entries[entryKey]) {
         dayObj.entries[entryKey] = { part: part, name: name, equip: equip, sets: [] };
         dayObj.order.push(entryKey);
@@ -3163,7 +3213,7 @@
           };
       entryObj.sets[setNo - 1] = setObj;
     }
-    return { dateOrder: dateOrder, byDate: byDate, rowCount: rowCount };
+    return { dateOrder: dateOrder, byDate: byDate, rowCount: rowCount, exercises: exercises };
   }
 
   function hasPreimportBackup() {
@@ -3186,13 +3236,17 @@
         return;
       }
       if (data.error) { toast(data.error); return; }
-      if (!data.dateOrder.length) { toast('取り込めるデータが見つかりませんでした'); return; }
-      var ok = confirm(data.dateOrder.length + '日分・' + data.rowCount + '件のデータを読み込みます。\n対象の日の記録は置き換わります。よろしいですか？');
+      if (!data.dateOrder.length && !data.exercises.length) { toast('取り込めるデータが見つかりませんでした'); return; }
+      var summary = data.dateOrder.length + '日分・' + data.rowCount + '件の記録';
+      if (data.exercises.length) summary += '、' + data.exercises.length + '種目のマスター';
+      var caution = data.dateOrder.length ? '\n対象の日の記録は置き換わります。' : '';
+      var ok = confirm(summary + 'を読み込みます。' + caution + '\nよろしいですか？');
       if (!ok) return;
 
       var backupJSON = DB.exportStateJSON();
       try {
         DB.applyImport(data.dateOrder, data.byDate);
+        DB.importExercises(data.exercises, true);
       } catch (e) {
         if (backupJSON) DB.restoreStateJSON(backupJSON);
         toast('取り込みに失敗したため元に戻しました');
@@ -3203,7 +3257,7 @@
       }
       renderLog();
       renderSettings();
-      toast(data.dateOrder.length + '日分のデータを取り込みました');
+      toast('記録と種目マスターを取り込みました');
     };
     reader.onerror = function () { toast('ファイルの読み込みに失敗しました'); };
     reader.readAsText(file, 'UTF-8');

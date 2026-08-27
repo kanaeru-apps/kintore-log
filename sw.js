@@ -1,5 +1,5 @@
 /* 筋トレLog Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v62';
+const CACHE = 'kintore-v63';
 const ASSETS = [
   './',
   './index.html',
