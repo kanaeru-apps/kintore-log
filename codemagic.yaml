@@ -26,6 +26,8 @@ workflows:
           npm audit --omit=dev --audit-level=moderate
           npm audit --audit-level=high
           npm run security:scan
+          npm run check:data-backup
+          npm run check:upgrade
       # PWA版のソースから www/ を生成する。廃止済みの匿名GAS同期や
       # 匿名フィードバック送信が再混入していたら、ここでビルドを止める
       - name: Build secured web assets
