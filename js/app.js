@@ -364,10 +364,57 @@
     }
     $('#exModalBody').innerHTML = html;
     $('#exModalBackdrop').classList.add('show');
+    $('#exModal').scrollTop = 0;
     $('#exModal').classList.add('show');
   }
 
+  /* iOSではキーボードが開いても固定要素の基準の高さは変わらないため、
+     visualViewportの可視領域に収め、モーダルの中だけをスクロールする。 */
+  var exInfoViewportFrame = 0;
+  var exInfoFocusTimer = 0;
+  function resetExInfoViewport() {
+    var modal = $('#exModal');
+    modal.classList.remove('editing');
+    modal.style.removeProperty('--ex-info-top');
+    modal.style.removeProperty('--ex-info-height');
+  }
+  function updateExInfoViewport() {
+    exInfoViewportFrame = 0;
+    var modal = $('#exModal');
+    var input = document.activeElement;
+    if (!modal.classList.contains('show') || !input ||
+        !modal.contains(input) || !input.matches('input, textarea')) {
+      resetExInfoViewport();
+      return;
+    }
+    var viewport = window.visualViewport;
+    var top = viewport ? viewport.offsetTop : 0;
+    var height = viewport ? viewport.height : window.innerHeight;
+    modal.style.setProperty('--ex-info-top', (top + height / 2) + 'px');
+    modal.style.setProperty('--ex-info-height', Math.max(0, height - 32) + 'px');
+    modal.classList.add('editing');
+
+    var bounds = modal.getBoundingClientRect();
+    var field = input.getBoundingClientRect();
+    var visibleTop = Math.max(bounds.top, top) + 16;
+    var visibleBottom = Math.min(bounds.bottom, top + height) - 16;
+    if (field.top < visibleTop || field.bottom > visibleBottom) {
+      // 中央付近に置き、直前のラベルも読みやすくする。背面の記録画面は動かさない。
+      modal.scrollTop += field.top - (visibleTop + Math.max(0,
+        (visibleBottom - visibleTop - field.height) / 2));
+    }
+  }
+  function scheduleExInfoViewport() {
+    if (!exInfoViewportFrame) {
+      exInfoViewportFrame = window.requestAnimationFrame(updateExInfoViewport);
+    }
+  }
+
   function closeExInfo() {
+    var active = document.activeElement;
+    if (active && $('#exModal').contains(active)) active.blur();
+    window.clearTimeout(exInfoFocusTimer);
+    resetExInfoViewport();
     $('#exModalBackdrop').classList.remove('show');
     $('#exModal').classList.remove('show');
   }
@@ -375,6 +422,18 @@
   function bindExInfo() {
     $('#exModalClose').onclick = closeExInfo;
     $('#exModalBackdrop').onclick = closeExInfo;
+    $('#exModalBody').addEventListener('focusin', function () {
+      scheduleExInfoViewport();
+      // キーボードのアニメーション後にも確認する（resize通知が遅れる端末向け）。
+      window.clearTimeout(exInfoFocusTimer);
+      exInfoFocusTimer = window.setTimeout(scheduleExInfoViewport, 350);
+    });
+    $('#exModalBody').addEventListener('focusout', scheduleExInfoViewport);
+    window.addEventListener('resize', scheduleExInfoViewport);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', scheduleExInfoViewport);
+      window.visualViewport.addEventListener('scroll', scheduleExInfoViewport);
+    }
     // 入力したら即保存
     $('#exModalBody').addEventListener('change', function (e) {
       if (!infoExId) return;
