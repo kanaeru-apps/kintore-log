@@ -158,4 +158,29 @@ assert.throws(
   /https:\/\//
 );
 
-console.log('Data backup check passed: native JSON / 21-column CSV / legacy 18-column CSV / URL validation');
+/* 485件の記録の直後（CSVの487行目）に日付なしマスターが来ても復元する。
+   メモ内の改行・カンマ・引用符も含め、実際のCSV文字列から検証する。 */
+const quote = value => '"' + String(value).replace(/"/g, '""') + '"';
+const regressionRows = [Array.from(csvContext.ROW_HEAD)];
+for (let i = 0; i < 485; i++) {
+  const row = Array.from(workoutRows[0]);
+  row[0] = '2026-08-' + String(1 + Math.floor(i / 100)).padStart(2, '0');
+  row[5] = String(1 + i % 100);
+  row[16] = '改行あり\nカンマ,と"引用符"';
+  regressionRows.push(row);
+}
+regressionRows.push(Array.from(masterRows[0]));
+const regression = csvContext.buildImportData(csvContext.parseCSV('\uFEFF' + regressionRows.map(row => row.map(quote).join(',')).join('\r\n')));
+assert.equal(regression.rowCount, 485);
+assert.equal(regression.exercises.length, 1);
+assert.equal(regression.byDate['2026-08-01'].memo, '改行あり\nカンマ,と"引用符"');
+// 解析だけでなくDBへの取り込み・再読み込みまで確かめる。
+const beforeImport = dbContext.DB.exportStateJSON();
+dbContext.DB.applyImport(regression.dateOrder, regression.byDate);
+dbContext.DB.importExercises(regression.exercises, true);
+const restoredExercise = dbContext.DB.findExercise('テストプレス', '胸', 'ダンベル');
+assert.equal(restoredExercise.note, '肘を開きすぎない');
+assert.equal(dbContext.DB.getWorkout('2026-08-01').entries[0].sets.length, 100);
+assert.equal(dbContext.DB.restoreStateJSON(beforeImport), true);
+assert.equal(dbContext.DB.exportStateJSON(), beforeImport);
+console.log('Data backup check passed: native JSON / 21-column CSV / legacy 18-column CSV / URL validation / row 487 regression / DB import and rollback');
