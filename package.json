@@ -23,7 +23,7 @@
     "@capacitor/local-notifications": "^8.3.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.5.0"
+    "@capacitor/cli": "^8.5.2"
   },
   "overrides": {
     "uuid": "^11.1.1"
