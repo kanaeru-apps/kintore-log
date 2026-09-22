@@ -59,7 +59,7 @@ var DB = (function () {
     var l = relLum(bg);
     return (l + 0.05) / 0.05 >= 1.05 / (l + 0.05) ? cssVar('--ink', '#0b0c0f') : '#ffffff';
   }
-  var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重'];
+  var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重', 'アシスト'];
   var CARDIO_PART = '有酸素';
   /* 有酸素セットのフィールド：時間(t/分)・秒(ts/0-59)・距離(d/km)・速度(sp/km/h)・傾斜(inc/%)・カロリー(cal/kcal)・心拍(hr/bpm)
      z はインターバルの強度ラベル（'hi'=WORK / 'rec'=REST / ''=タグなし）。他と違い数値ではなく文字列で、

@@ -4382,6 +4382,18 @@
   initTheme();
   renderLog(true);
 
+  // iPhoneの前後の入力欄へ移動する矢印は、ピッカーの背後へフォーカスを移すため非表示にする。
+  // キーボード上の補助バー全体を隠し、確定・終了は画面内の「完了」等を使う。
+  // resize:none は従来のWebView/visualViewportによるレイアウト処理を保つための設定。
+  if (isNativeApp() && window.Capacitor.getPlatform() === 'ios') {
+    var keyboard = nativePlugin('Keyboard');
+    if (keyboard) {
+      keyboard.setAccessoryBarVisible({ isVisible: false }).catch(function (error) {
+        console.warn('キーボード補助バーを非表示にできませんでした', error);
+      });
+    }
+  }
+
   // 通知で付いたバッジを、コールド起動時にも必ず消す。
   // 最初からvisibleで起動した場合はvisibilitychangeが発火しないため、復帰時処理だけでは不足する。
   clearBadge();
