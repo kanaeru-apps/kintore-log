@@ -2823,31 +2823,6 @@
     ensureNotificationSounds();
   }
 
-  /* 設定画面の「通知テスト」。タイマーを5分回さなくても10秒で試せるようにする。 */
-  function runNotifTest() {
-    var out = $('#testNotifResult');
-    function say(t) { if (out) out.textContent = t; }
-    if (!isNativeApp()) { say('ブラウザ版では試せません（アプリ版のみ）'); return; }
-    var ln = nativePlugin('LocalNotifications');
-    if (!ln) { say('NG: 通知プラグインが読み込まれていません'); return; }
-
-    // タイマー本体と同じく、待たずにまず予約する
-    var atMs = Date.now() + 10000;
-    pushNotif(ln, TEST_NOTIF_ID, 'テスト通知です（10秒後）', atMs);
-    say('予約しました。' + hhmmss(new Date(atMs)) + ' に鳴ります。今すぐホーム画面に戻るか画面を消して待ってください');
-
-    withTimeout(ensureNotifPermission(), PERM_WAIT_MS, null)
-      .then(function (granted) {
-        if (granted === false) {
-          say('NG: 通知が許可されていません。iPhoneの「設定 > 通知 > 筋トレLog」を開いて「通知を許可」をONにしてください');
-        }
-        // 予約一覧は renderSoundDiag が取り直す。ここで先に聞くと同じ問い合わせが二重になる
-      })
-      .then(renderSoundDiag)
-      .catch(function (e) { noteAppError('通知テスト', e); });
-    ensureNotificationSounds();
-  }
-
   /* cancel が消すのは「まだ配信されていない予約」だけ。配信済みの通知には効かない。 */
   function cancelTimerNotification() {
     var ln = nativePlugin('LocalNotifications');
@@ -4218,74 +4193,6 @@
     $('#ignoreSilentNote').textContent = nativeAudio
       ? 'アプリを開いているときのアラーム音のみ。閉じているときの通知音は iPhone の設定に従います'
       : '消音中やYouTube再生中も終了音を優先します。終了音の数秒間はYouTubeなどが止まる場合があります';
-    $('#soundDiagSection').hidden = !isNativeApp();
-    renderSoundDiag();
-  }
-  /* OSへの問い合わせが返ってこないと、欄が「確認中…」のまま固まって
-     何が起きているのか実機から読み取れない。時間切れをはっきり書き出す。 */
-  var DIAG_WAIT_MS = 4000;
-  /* key は soundDiag のどの欄を担当するか。work は表示する文言を返す。
-     失敗や時間切れのときに前回の値を残すと、たとえば許可が取れなくなった回でも
-     古い「granted」がそのまま出て、診断そのものが嘘をつく。
-     ここで必ず失敗として上書きしてから表示する。
-     ただし上書きしてよいのは、この問い合わせが今もその欄の最新である場合だけ。
-     欄ごとに番号を取り、成功・失敗・時間切れのどの道でも writeDiag を通す。
-     work の中で soundDiag を直接書かせないのも同じ理由で、
-     そうしないと追い越された問い合わせが表示だけ古い値に戻してしまう。 */
-  function fillDiag(sel, key, work) {
-    var el = $(sel);
-    if (!el) return Promise.resolve();
-    var token = claimDiag(key);
-    el.textContent = '確認中…';
-    var settled = false;
-    var p = Promise.resolve()
-      .then(work)
-      .then(function (text) {
-        settled = true;
-        writeDiag(key, token, (text === null || text === undefined) ? '取得できず' : String(text));
-      })
-      .catch(function (e) {
-        settled = true;
-        if (writeDiag(key, token, 'NG: ' + errText(e))) noteAppError('診断', e);
-      });
-    return withTimeout(p, DIAG_WAIT_MS, null).then(function () {
-      if (settled) return;
-      /* 時間切れを出したあとにこの問い合わせが遅れて返ってきても、
-         「返ってこなかった」という事実の方を残す。番号を進めて資格を失わせる。 */
-      if (writeDiag(key, token, '確認が返ってきません（時間切れ）')) claimDiag(key);
-    });
-  }
-
-  /* 「鳴らない」ときにどこで止まっているかを見せる */
-  function renderSoundDiag() {
-    if (!isNativeApp()) return;
-    // ここで例外が出ると全欄が初期表示のまま残り、実機では「何も出ていない」ようにしか見えない
-    try {
-      $('#diagPlay').textContent = soundDiag.play;
-      $('#diagNotif').textContent = soundDiag.notif;
-      $('#diagSched').textContent = soundDiag.sched;
-      // OSに聞く必要がない（アプリ側の設定で決まる）ので、その場で組み立てて出す
-      soundDiag.foreground = describeForegroundPresentation();
-      $('#diagForeground').textContent = soundDiag.foreground;
-      $('#diagErr').textContent = lastAppError || 'なし';
-    } catch (e) { noteAppError('診断表示', e); }
-
-    var ln = nativePlugin('LocalNotifications');
-    if (ln) {
-      fillDiag('#diagPerm', 'perm', function () {
-        return ln.checkPermissions().then(function (r) { return (r && r.display) || '不明'; });
-      });
-    } else {
-      writeDiag('perm', claimDiag('perm'), 'NG: プラグイン未登録');
-    }
-    // OSに聞かないと分からないものは、画面を開くたびに取り直す
-    fillDiag('#diagSession', 'session', refreshSessionDiag);
-    fillDiag('#diagPending', 'pending', refreshPendingDiag);
-    fillDiag('#diagDelivered', 'delivered', refreshDeliveredDiag);
-    fillDiag('#diagIos', 'ios', refreshIosNotifDiag);
-    fillDiag('#diagFiles', 'files', function () {
-      return readSoundFiles().then(describeSoundFiles);
-    });
   }
   var timerSettingsBound = false;
   function bindTimerSettingsOnce() {
@@ -4300,8 +4207,6 @@
       saveTimerSettings();
       renderTimerSettings();
       previewSound(timerSettings.sound);
-      // 試聴の結果（成功/失敗）を診断欄に反映させる
-      setTimeout(renderSoundDiag, 400);
       // 計測中に音色を変えたら、予約済みの通知も新しい音で取り直す
       if (timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
     });
@@ -4323,7 +4228,7 @@
       if (!isNativeApp()) { e.target.checked = true; return; }
       timerSettings.ignoreSilent = e.target.checked;
       saveTimerSettings();
-      applySilentModeSetting().then(renderSoundDiag);
+      applySilentModeSetting();
     });
     $('#toggleNotifyOn').addEventListener('change', function (e) {
       timerSettings.notifyOn = e.target.checked;
@@ -4335,11 +4240,8 @@
       } else {
         cancelTimerNotification(); // OFFにした以上、OSに預けた予約も取り消す
       }
-      setTimeout(renderSoundDiag, 400);
       setTimeout(refreshNotifWarning, 600);
     });
-    var testBtn = $('#testNotifBtn');
-    if (testBtn) testBtn.addEventListener('click', runNotifTest);
   }
 
   /* ================== タブ切り替え・初期化 ================== */
