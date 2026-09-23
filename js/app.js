@@ -1284,9 +1284,8 @@
     var rows = e.sets.map(function (s, n) {
       return '<div class="core-inline-row" data-idx="' + n + '"><span class="core-set-number">' + (n + 1) + '</span>' +
         (cfg.mode !== 'reps' ? input(s, 'seconds', n, '秒') : '') +
-        (cfg.mode === 'hold' ? '<span class="core-multiply">×</span>' : '') +
         (cfg.mode !== 'time' ? input(s, 'reps', n, '回') : '') +
-        '<button class="core-remove" data-action="del-set" aria-label="セット' + (n + 1) + 'を削除">×</button></div>';
+        '<button class="set-del" data-action="del-set" aria-label="セット' + (n + 1) + 'を削除">✕</button></div>';
     }).join('');
     return '<article class="entry core-entry" data-entry="' + e.id + '">' + entryHead(e) + prevLine(e) +
       '<div class="sets core-inline-sets">' + rows + '</div><div class="entry-foot"><button class="btn ghost small" data-action="add-set">＋ セット追加</button>' +

@@ -2106,8 +2106,7 @@ button { cursor: pointer; }
 .core-inline-field { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; }
 .core-inline-field input { width: 100%; min-width: 0; height: 52px; text-align: center; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; font-size: 24px; }
 .core-inline-field input:focus { border-color: var(--accent); outline: 1px solid var(--accent); }
-.core-inline-field small, .core-multiply { font-size: 11px; color: var(--dim); }
-.core-remove { flex-shrink: 0; width: 24px; padding: 8px 0; background: none; border: 0; color: var(--dim); font-size: 21px; }
+.core-inline-field small { font-size: 11px; color: var(--dim); }
 .core-options { grid-template-columns: 1fr; }
 #numberInputBar { position: fixed; z-index: 1200; left: 50%; transform: translateX(-50%); bottom: var(--number-keyboard-bottom, 0px); width: min(100%, 560px); min-height: 56px; padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--panel2); border-top: 1px solid var(--line2); box-shadow: 0 -4px 16px #0002; }
 #numberInputLabel { font-size: 12px; color: var(--dim); }
