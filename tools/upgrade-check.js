@@ -36,18 +36,20 @@ function boot() {
   vm.createContext(c);vm.runInContext(read('js/db.js'),c);return c.DB;
 }
 let db=boot();
-assert.deepEqual(JSON.parse(db.exportStateJSON()),fixture,'起動時に既存DBを変更しない');
+assert.deepEqual(JSON.parse(storage.getItem(db.PRE_CORE_KEY)),fixture,'移行前DBを完全保存');
+assert.deepEqual(JSON.parse(db.exportStateJSON()).workouts,fixture.workouts,'既存履歴を変更しない');
+assert.equal(db.getExercises().filter(e=>e.part==='体幹').length,6);
 for(const [key,value] of Object.entries(settings)) assert.equal(storage.getItem(key),value,key);
 db.setMemo('2026-09-07','更新後の新しい記録');
 db=boot();
 const after=JSON.parse(db.exportStateJSON());
-assert.deepEqual(after.exercises,fixture.exercises);
+assert.deepEqual(after.exercises.filter(e=>e.part!=='体幹'),fixture.exercises);
 for(const [date,workout] of Object.entries(fixture.workouts)) assert.deepEqual(after.workouts[date],workout);
 assert.deepEqual(after.deletedExercises,fixture.deletedExercises);
 assert.equal(after.workouts['2026-09-07'].memo,'更新後の新しい記録');
 // 履歴のない利用者の種目マスターも初期化しない。
 storage.setItem('kintore_v1',JSON.stringify({...fixture,workouts:{}}));
-assert.deepEqual(JSON.parse(boot().exportStateJSON()).exercises,fixture.exercises);
+assert.deepEqual(JSON.parse(boot().exportStateJSON()).exercises.filter(e=>e.part!=='体幹'),fixture.exercises);
 // アプリ識別子・WebViewの保存先を変えると、同じキーでも別の保存領域になる。
 const config=JSON.parse(read('capacitor.config.json'));
 assert.equal(config.appId,'com.kanaeru.kintore');
@@ -64,7 +66,7 @@ async function checkNativeBackup() {
   const writes=[];
   const c={DB:existingDB,localStorage:storage,Date,Promise,
     isNativeApp:()=>true,
-    nativePlugin:()=>({readFile:()=>{reads++;return Promise.resolve({data:JSON.stringify({...fixture,workouts:{}})});},writeFile:args=>{writes.push(args);return Promise.resolve();}}),
+    nativePlugin:()=>({readFile:args=>{reads++;if(args.path==='kintore-pre-core-20260923.json') return Promise.reject(new Error('not found'));return Promise.resolve({data:JSON.stringify({...fixture,workouts:{}})});},writeFile:args=>{writes.push(args);return Promise.resolve();}}),
     renderStorageInfo(){},renderLog(){},renderSettings(){},toast(){}
   };
   vm.createContext(c);
@@ -76,9 +78,12 @@ async function checkNativeBackup() {
   c.restoreNativeBackupIfEmpty();
   assert.equal(reads,0,'既存履歴がある更新では古いバックアップを読み込まない');
   assert.equal(await c.writeNativeBackup(),true);
-  assert.equal(writes[0].path,'kintore-backup.json');
-  assert.equal(writes[0].directory,'DOCUMENTS');
+  assert.equal(writes[0].path,'kintore-pre-core-20260923.json');
   assert.deepEqual(JSON.parse(writes[0].data),fixture);
+  assert.equal(writes[1].path,'kintore-backup.json');
+  assert.equal(writes[1].directory,'DOCUMENTS');
+  assert.deepEqual(JSON.parse(writes[1].data).workouts,fixture.workouts);
+  assert.deepEqual(JSON.parse(writes[1].data).exercises.filter(e=>e.part!=='体幹'),fixture.exercises);
   for(const [key,value] of Object.entries(settings)) assert.equal(storage.getItem(key),value,key);
 }
 checkNativeBackup().then(()=>console.log('Upgrade check passed: existing DB / exercise IDs and metadata / strength and cardio history / memo-only days / settings storage / relaunch / app identity / native backup preserves existing records')).catch(error=>{console.error(error);process.exitCode=1;});

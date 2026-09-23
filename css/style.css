@@ -2077,3 +2077,24 @@ button { cursor: pointer; }
   .btn.primary:hover { background: var(--volt-press); }
   .link:hover { text-decoration: underline; }
 }
+
+/* Core recording: seconds/repetitions, never weight or volume. */
+:root { --p-trunk: #85e3cb; }
+:root[data-theme='light'] { --p-trunk: #176857; }
+.p-trunk { color: var(--p-trunk); background: color-mix(in srgb, var(--p-trunk) 12%, transparent); }
+.core-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0; }
+.core-options label, .core-input { font-size: 12px; color: var(--dim); min-width: 0; }
+.core-options select { width: 100%; margin-top: 6px; }
+.core-hint { color: var(--dim); font-size: 12px; line-height: 1.7; margin: 12px 0; }
+.core-set { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-top: 10px; }
+.core-set-head { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; margin-bottom: 8px; }
+.core-measures { display: flex; gap: 12px; margin-top: 8px; }
+.core-input { flex: 1; }
+.core-input span { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.core-input input { min-width: 0; width: 100%; font-size: 22px; padding: 10px; }
+.core-input small { white-space: nowrap; }
+.core-entry .entry-foot { flex-wrap: wrap; gap: 10px; }
+.core-entry .vol { width: 100%; white-space: normal; font-size: 12px; color: var(--p-trunk); }
+[hidden] { display: none !important; }
+
+.core-input input { border: 1px solid var(--line); background: var(--panel2); border-radius: 8px; color: var(--text); }

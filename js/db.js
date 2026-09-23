@@ -8,7 +8,7 @@
 
 var DB = (function () {
   var KEY = 'kintore_v1';
-  var PARTS = ['胸', '背中', '脚', '肩', '腕', '腹', '有酸素', 'その他'];
+  var PARTS = ['胸', '背中', '脚', '肩', '腕', '腹', '体幹', '有酸素', 'その他'];
   /* 記録画面の部位チップ（.p-xxx）と同じ配色。グラフの線色とカレンダーの塗りで共用する。
      app.js と charts.js の両方が使うため、部位の情報を持つここに置く（2か所にコピーすると
      色を変えたとき片方だけ直す事故になる）。有酸素はキーを持たず、使う側でボルトイエローに落ちる。
@@ -16,12 +16,12 @@ var DB = (function () {
      テーマを切り替えたら refreshThemeColors() で中身を入れ替える */
   var PART_VAR = {
     '胸': '--p-chest', '背中': '--p-back', '脚': '--p-leg', '肩': '--p-shoulder',
-    '腕': '--p-arm', '腹': '--p-core', 'その他': '--p-etc'
+    '腕': '--p-arm', '腹': '--p-core', '体幹': '--p-trunk', 'その他': '--p-etc'
   };
   /* CSSが読めなかったときのフォールバック（ダークテーマの値） */
   var PART_COLOR = {
     '胸': '#ff8484', '背中': '#74b6ff', '脚': '#ffbc57', '肩': '#c9a4ff',
-    '腕': '#62e3cb', '腹': '#ff9ec4', 'その他': '#9ba0a8'
+    '腕': '#62e3cb', '腹': '#ff9ec4', '体幹': '#85e3cb', 'その他': '#9ba0a8'
   };
 
   /* CSS変数の実際の値を読む。JS側で色を決める場所（グラフのSVG・カレンダーの塗り）は
@@ -59,7 +59,7 @@ var DB = (function () {
     var l = relLum(bg);
     return (l + 0.05) / 0.05 >= 1.05 / (l + 0.05) ? cssVar('--ink', '#0b0c0f') : '#ffffff';
   }
-  var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重', 'アシスト'];
+  var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重', 'アシスト', 'チューブ', 'バランスボール'];
   var CARDIO_PART = '有酸素';
   /* 有酸素セットのフィールド：時間(t/分)・秒(ts/0-59)・距離(d/km)・速度(sp/km/h)・傾斜(inc/%)・カロリー(cal/kcal)・心拍(hr/bpm)
      z はインターバルの強度ラベル（'hi'=WORK / 'rec'=REST / ''=タグなし）。他と違い数値ではなく文字列で、
@@ -75,6 +75,57 @@ var DB = (function () {
     ['トレッドミル', '有酸素', 'マシン'], ['エアロバイク', '有酸素', 'マシン'], ['ランニング', '有酸素', '自重'], ['ウォーキング', '有酸素', '自重']
   ];
 
+  var CORE_PART = '体幹';
+  var CORE_KEYS = ['seconds', 'reps', 'rightSeconds', 'rightReps'];
+  var PRE_CORE_KEY = 'kintore_v1_pre_core_20260923';
+  var CORE_DEFAULTS = [
+    ['プランク', 'time', false], ['サイドプランク', 'time', true],
+    ['ドローイン', 'hold', false], ['デッドバグ', 'reps', true],
+    ['バードドッグ', 'hold', true], ['パロフプレス', 'reps', true]
+  ];
+  function coreConfig(e) {
+    return { mode: ['time', 'reps', 'hold'].indexOf(e.coreMode) >= 0 ? e.coreMode : 'time', side: e.coreSide === true };
+  }
+  function coreValue(v) { var n = Number(v); return Number.isInteger(n) && n > 0 && n <= 86400 ? n : 0; }
+  function coreSetStats(e, s) {
+    var cfg = coreConfig(e), result = { seconds: 0, reps: 0, longest: 0, complete: 0, pending: false };
+    (cfg.side ? ['', 'right'] : ['']).forEach(function (side) {
+      var t = coreValue(s[side ? 'rightSeconds' : 'seconds']);
+      var r = coreValue(s[side ? 'rightReps' : 'reps']);
+      var valid = cfg.mode === 'time' ? t > 0 : cfg.mode === 'reps' ? r > 0 : t > 0 && r > 0;
+      if (!valid) { if (cfg.mode === 'hold' && (t || r)) result.pending = true; return; }
+      result.complete++;
+      result.seconds += cfg.mode === 'reps' ? 0 : t * (cfg.mode === 'hold' ? r : 1);
+      result.reps += cfg.mode === 'time' ? 0 : r;
+      result.longest = Math.max(result.longest, cfg.mode === 'reps' ? 0 : t);
+    });
+    return result;
+  }
+  function coreTotals(e) {
+    var out = { seconds: 0, reps: 0, longest: 0, sets: 0, partial: 0, pending: false };
+    (e.sets || []).forEach(function (s) {
+      var v = coreSetStats(e, s);
+      out.seconds += v.seconds; out.reps += v.reps; out.longest = Math.max(out.longest, v.longest);
+      if (v.complete) out.sets++;
+      if (coreConfig(e).side && v.complete === 1) out.partial++;
+      if (v.pending) out.pending = true;
+    });
+    return out;
+  }
+  function addCoreDefaults() {
+    if (state.coreSchema === 1) return;
+    // Back up the original state before any additive migration. Never overwrite the rollback copy.
+    var priorBackup = localStorage.getItem(PRE_CORE_KEY);
+    var priorHasHistory = priorBackup && Object.keys(JSON.parse(priorBackup).workouts || {}).length > 0;
+    if (!priorBackup || (!priorHasHistory && Object.keys(state.workouts).length > 0)) localStorage.setItem(PRE_CORE_KEY, JSON.stringify(state));
+    CORE_DEFAULTS.forEach(function (d) {
+      if (!state.exercises.some(function (x) { return x.part === CORE_PART && x.name === d[0]; })) {
+        state.exercises.push({ id: uid(), name: d[0], part: CORE_PART, equip: d[0] === 'パロフプレス' ? 'チューブ' : '自重', coreMode: d[1], coreSide: d[2] });
+      }
+    });
+    state.coreSchema = 1;
+    save();
+  }
   var state = null;
 
   function uid() {
@@ -86,6 +137,7 @@ var DB = (function () {
   /* 部位に応じた空セット（有酸素は7項目、それ以外は重量×回数）
      筋トレの重量は新規セット時に50kgをデフォルトにする。回数は常に0スタート（前回の回数を引き継がない） */
   function emptySet(part) {
+    if (part === CORE_PART) return { seconds: '', reps: '', rightSeconds: '', rightReps: '' };
     if (isCardioPart(part)) {
       var s = {};
       CARDIO_KEYS.forEach(function (k) { s[k] = ''; });
@@ -96,6 +148,7 @@ var DB = (function () {
   /* 前回値の引き継ぎ・セット追加時に既存セットを複製する（部位で形が異なる）
      筋トレは重量のみ引き継ぎ、回数は毎回0から（前回の回数を誤って使い回さないため） */
   function copySet(part, s) {
+    if (part === CORE_PART) return emptySet(part);
     if (isCardioPart(part)) {
       var out = {};
       CARDIO_KEYS.forEach(function (k) { out[k] = cp(s[k]); });
@@ -180,6 +233,7 @@ var DB = (function () {
         var s = JSON.parse(raw);
         if (s && s.exercises && s.workouts) {
           state = s;
+          addCoreDefaults();
           migrate();
           if (!state.dirtyDates) {
             // 同期機能を導入する前からのデータ：初回同期で全履歴を送れるよう既存の記録日をすべてdirty扱いにする
@@ -200,7 +254,7 @@ var DB = (function () {
           return;
         }
       }
-    } catch (e) { /* 壊れていたら初期化 */ }
+    } catch (e) { if (state) throw e; /* バックアップ失敗時は既存データを初期化しない */ }
     state = {
       version: 2,
       exercises: DEFAULTS.map(function (d, i) { return { id: 'd' + i, name: d[0], part: d[1], equip: d[2] }; }),
@@ -209,6 +263,7 @@ var DB = (function () {
       dirtyExercises: true,
       deletedExercises: []
     };
+    addCoreDefaults();
     save();
   }
 
@@ -277,7 +332,10 @@ var DB = (function () {
         if (!e.sets || !e.sets.length) continue;
         var same = e.exId === exId ||
           (ex && e.name === ex.name && e.part === ex.part && (e.equip || '') === (ex.equip || ''));
-        if (same) return { date: dates[i], sets: e.sets };
+        if (same) {
+          if (ex && ex.part === CORE_PART && (coreConfig(ex).mode !== coreConfig(e).mode || coreConfig(ex).side !== coreConfig(e).side)) continue;
+          return { date: dates[i], sets: e.sets, coreMode: e.coreMode, coreSide: e.coreSide };
+        }
       }
     }
     return null;
@@ -289,7 +347,7 @@ var DB = (function () {
     Object.keys(state.workouts).forEach(function (date) {
       var w = state.workouts[date];
       (w.entries || []).forEach(function (e) {
-        if (e.exId !== exId || isCardioPart(e.part)) return;
+        if (e.exId !== exId || isCardioPart(e.part) || e.part === CORE_PART) return;
         var vol = (e.sets || []).reduce(function (sum, s) {
           return sum + ((+s.w || 0) * (+s.r || 0));
         }, 0);
@@ -320,6 +378,11 @@ var DB = (function () {
   load();
 
   return {
+    coreConfig: coreConfig,
+    coreSetStats: coreSetStats,
+    coreTotals: coreTotals,
+    coreValue: coreValue,
+    PRE_CORE_KEY: PRE_CORE_KEY,
     PARTS: PARTS,
     PART_COLOR: PART_COLOR,
     EQUIPS: EQUIPS,
@@ -332,8 +395,9 @@ var DB = (function () {
     getExercises: function () { return state.exercises.slice(); },
     getExercise: getExercise,
     findExercise: findExercise,
-    addExercise: function (name, part, equip) {
+    addExercise: function (name, part, equip, core) {
       var ex = { id: uid(), name: name, part: part, equip: equip || '' };
+      if (part === CORE_PART) { var cfg = coreConfig(core || {}); ex.coreMode = cfg.mode; ex.coreSide = cfg.side; }
       state.exercises.push(ex);
       // 以前に削除した種目と同じなら、削除の控えを取り消す（登録直後に消される事故を防ぐ）
       unmarkExerciseDeleted(part, name, equip || '');
@@ -407,6 +471,7 @@ var DB = (function () {
       var w = ensure(date);
       // 種目名・部位・器具は記録時点の値を保持（種目マスタから削除しても履歴が壊れない）
       var entry = { id: uid(), exId: exId, name: ex.name, part: ex.part, equip: ex.equip || '', sets: [] };
+      if (ex.part === CORE_PART) { var cfg = coreConfig(ex); entry.coreMode = cfg.mode; entry.coreSide = cfg.side; }
       // 前回の記録があれば引き継ぐ。無ければ既定の行数を用意する
       // 筋トレは前回何セットやっていても上から3セット分だけ引き継ぐ（4セット目以降は「＋セット追加」で）。
       // 有酸素は前回の全セッションを引き継ぐ（インターバル構成を保つため）
@@ -432,7 +497,7 @@ var DB = (function () {
       markDirty(date);
       save();
     },
-    addSet: function (date, entryId) {
+    addSet: function (date, entryId, duplicate) {
       var e = findEntry(date, entryId);
       if (!e) return;
       var last = e.sets[e.sets.length - 1];
@@ -440,7 +505,11 @@ var DB = (function () {
         var prev = prevRecord(e.exId, date);
         last = prev ? prev.sets[prev.sets.length - 1] : null;
       }
-      e.sets.push(last ? copySet(e.part, last) : emptySet(e.part));
+      if (e.part === CORE_PART && duplicate && last) {
+        var copied = emptySet(e.part);
+        CORE_KEYS.forEach(function (k) { copied[k] = cp(last[k]); });
+        e.sets.push(copied);
+      } else e.sets.push(last ? copySet(e.part, last) : emptySet(e.part));
       markDirty(date);
       save();
     },
@@ -450,7 +519,13 @@ var DB = (function () {
     },
     updateSet: function (date, entryId, idx, field, val) {
       var e = findEntry(date, entryId);
-      if (e && e.sets[idx]) { e.sets[idx][field] = val; markDirty(date); save(); }
+      if (e && e.sets[idx]) {
+        if (e.part === CORE_PART) {
+          if (CORE_KEYS.indexOf(field) < 0) return;
+          val = val === '' ? '' : coreValue(val);
+        }
+        e.sets[idx][field] = val; markDirty(date); save();
+      }
     },
     removeSet: function (date, entryId, idx) {
       var e = findEntry(date, entryId);
@@ -515,7 +590,9 @@ var DB = (function () {
           var ex = resolveExercise(d.name, d.part, d.equip);
           var sets = d.sets.filter(function (s) { return !!s; }); // 歯抜け（セット番号の飛び）を除去
           if (!sets.length) sets = [emptySet(d.part)];
-          return { id: uid(), exId: ex.id, name: d.name, part: d.part, equip: d.equip || '', sets: sets };
+          var entry = { id: uid(), exId: ex.id, name: d.name, part: d.part, equip: d.equip || '', sets: sets };
+          if (d.part === CORE_PART) { var cfg = coreConfig(d); entry.coreMode = cfg.mode; entry.coreSide = cfg.side; ex.coreMode = cfg.mode; ex.coreSide = cfg.side; }
+          return entry;
         });
         w.memo = dayData.memo || '';
         markDirty(date);
@@ -537,6 +614,7 @@ var DB = (function () {
         }
         // 復元した種目が、過去の削除控えによって後から消されないようにする
         unmarkExerciseDeleted(d.part, d.name, d.equip || '');
+        if (d.part === CORE_PART) { var cfg = coreConfig(d); ex.coreMode = cfg.mode; ex.coreSide = cfg.side; changed = true; }
         if (overwriteMetadata) {
           var video = d.video || '';
           var note = d.note || '';
@@ -557,15 +635,18 @@ var DB = (function () {
       try { return JSON.stringify(state); } catch (e) { return null; }
     },
     restoreStateJSON: function (json) {
+      var previousState = state;
       try {
         var s = JSON.parse(json);
         if (!s || !s.exercises || !s.workouts) return false;
         if (!s.dirtyDates) s.dirtyDates = {};
         if (!s.deletedExercises) s.deletedExercises = [];
         state = s;
+        addCoreDefaults();
+        migrate();
         save();
         return true;
-      } catch (e) { return false; }
+      } catch (e) { state = previousState; return false; }
     }
   };
 })();

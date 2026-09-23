@@ -21,8 +21,8 @@
 <!-- テーマの初期設定。CSSより先に <html data-theme> を決めておかないと、起動の一瞬だけ
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
-<script src="js/theme-init.js?v=0.13.21"></script>
-<link rel="stylesheet" href="css/style.css?v=0.13.21">
+<script src="js/theme-init.js?v=0.14.0"></script>
+<link rel="stylesheet" href="css/style.css?v=0.14.0">
 </head>
 <body>
 <div id="app">
@@ -196,6 +196,7 @@
             <button id="addExBtn" class="btn primary small">追加</button>
           </div>
         </div>
+        <div id="newCoreFields" hidden></div>
         <div id="exList"></div>
       </div>
 
@@ -229,6 +230,10 @@
           <div class="s-row">
             <div class="s-main"><b>CSVインポート</b><small>記録と種目マスターをCSVから復元（対象の日は置き換わります）</small></div>
             <button class="link" id="importCsvBtn">読み込む</button>
+          </div>
+          <div class="s-row">
+            <div class="s-main"><b>体幹追加前のデータ</b><small>初回起動前の状態をJSONで保存。通常のCSVとは別に保管します。</small></div>
+            <button class="link" id="exportPreCoreBtn">保存</button>
           </div>
           <div class="s-row" id="restoreBackupRow" style="display:none">
             <div class="s-main"><b>インポート前の状態に戻す</b><small>直前のCSV取り込みを取り消します</small></div>
@@ -281,7 +286,7 @@
         </div>
       </div>
 
-      <p class="version">筋トレLog v0.13.21 — Phase 8</p>
+      <p class="version">筋トレLog v0.14.0 — 体幹追加版</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -363,6 +368,7 @@
     </div>
     <div id="sheetList" class="sheet-list"></div>
     <div class="new-ex">
+      <div id="sheetCoreFields" hidden></div>
       <input id="sheetNewName" type="text" placeholder="リストにない種目名を入力…">
       <div class="new-ex-row">
         <select id="sheetNewEquip" aria-label="器具"></select>
@@ -535,9 +541,9 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.13.21"></script>
-<script src="js/app.js?v=0.13.21"></script>
-<script src="js/charts.js?v=0.13.21"></script>
-<script src="js/register-sw.js?v=0.13.21"></script>
+<script src="js/db.js?v=0.14.0"></script>
+<script src="js/app.js?v=0.14.0"></script>
+<script src="js/charts.js?v=0.14.0"></script>
+<script src="js/register-sw.js?v=0.14.0"></script>
 </body>
 </html>

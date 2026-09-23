@@ -89,7 +89,7 @@ const csvContext = {
   limitedText,
   safeHttpsUrl,
   DB: {
-    PARTS: ['胸', '背中', '脚', '肩', '腕', '腹', '有酸素', 'その他'],
+    PARTS: ['胸', '背中', '脚', '肩', '腕', '腹', '体幹', '有酸素', 'その他'],
     getExercises() { return exercises; },
     getWorkout(date) { return date === '2026-08-27' ? workout : null; },
     datesWithData() { return ['2026-08-27']; },
@@ -97,6 +97,7 @@ const csvContext = {
   },
   parseDate(value) { return new Date(value + 'T00:00:00'); },
   WD: ['日', '月', '火', '水', '木', '金', '土'],
+  isCore(entry) { return entry.part === '体幹'; },
   isCardio(entry) { return entry.part === '有酸素'; },
   zoneCsv(value) { return value || ''; },
   zoneOf() { return ''; },
@@ -112,16 +113,16 @@ const csvContext = {
 vm.createContext(csvContext);
 vm.runInContext(appSource.slice(csvStart, csvEnd), csvContext, { filename: 'js/app.js#csv' });
 
-assert.equal(csvContext.ROW_HEAD.length, 21);
+assert.equal(csvContext.ROW_HEAD.length, 27);
 assert.deepEqual(
-  Array.from(csvContext.ROW_HEAD.slice(-3)),
+  Array.from(csvContext.ROW_HEAD.slice(18, 21)),
   ['データ種別', '参考動画URL', 'フォームメモ']
 );
 const workoutRows = csvContext.rowsForDate('2026-08-27');
 const masterRows = csvContext.rowsForExerciseMaster();
-assert.equal(workoutRows[0].length, 21);
+assert.equal(workoutRows[0].length, 27);
 assert.equal(workoutRows[0][18], '記録');
-assert.equal(masterRows[0].length, 21);
+assert.equal(masterRows[0].length, 27);
 assert.equal(masterRows[0][18], '種目マスター');
 assert.equal(masterRows[0][19], 'https://example.com/video');
 assert.equal(masterRows[0][20], '肘を開きすぎない');
@@ -183,4 +184,4 @@ assert.equal(restoredExercise.note, '肘を開きすぎない');
 assert.equal(dbContext.DB.getWorkout('2026-08-01').entries[0].sets.length, 100);
 assert.equal(dbContext.DB.restoreStateJSON(beforeImport), true);
 assert.equal(dbContext.DB.exportStateJSON(), beforeImport);
-console.log('Data backup check passed: native JSON / 21-column CSV / legacy 18-column CSV / URL validation / row 487 regression / DB import and rollback');
+console.log('Data backup check passed: native JSON / 27-column CSV (original 21 columns retained) / legacy 18-column CSV / URL validation / row 487 regression / DB import and rollback');

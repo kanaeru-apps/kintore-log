@@ -61,3 +61,62 @@ workflows:
         # 外部テスターに配布したくなったら true に戻す。
         submit_to_testflight: false
         # 本申請する段階になったら submit_to_app_store: true に変更する
+
+  ios-core-preview:
+    name: Kintore Log Core Preview (build only)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      # Codemagic の「Settings > Integrations > Developer Portal」で
+      # API キーを登録した際につけた名前をここに指定する
+      app_store_connect: Codemagic
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.kanaeru.kintore
+      vars:
+        XCODE_PROJECT: "ios/App/App.xcodeproj"
+        XCODE_SCHEME: "App"
+      # ビルド環境の予期しない更新を避ける。Codemagicでは26.4指定が最新26.4.xへ解決される。
+      node: 24.14.1
+      npm: 11.11.0
+      xcode: 26.4
+    scripts:
+      - name: Verify core branch
+        script: |
+          test "$CM_BRANCH" = "feature/core-training"
+          git rev-parse HEAD > core-build-commit.txt
+      - name: Install npm dependencies
+        script: npm ci
+      - name: Security checks
+        script: |
+          npm audit --omit=dev --audit-level=moderate
+          npm audit --audit-level=high
+          npm run security:scan
+          npm run check:data-backup
+          npm run check:upgrade
+          npm run check:alarmkit
+          npm run check:csv-export
+      # PWA版のソースから www/ を生成する。廃止済みの匿名GAS同期や
+      # 匿名フィードバック送信が再混入していたら、ここでビルドを止める
+      - name: Build secured web assets
+        script: npm run verify
+      # Package.swift は Windows 側で生成するとパス区切りが壊れるため追跡していない。
+      # この cap sync が macOS 上で正しい形に再生成する
+      - name: Sync Capacitor iOS project
+        script: npx cap sync ios
+      - name: Set up code signing
+        script: xcode-project use-profiles
+      - name: Increment build number
+        script: |
+          cd "$CM_BUILD_DIR/ios/App"
+          agvtool new-version -all "$BUILD_NUMBER"
+      - name: Build ipa for distribution
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - core-build-commit.txt

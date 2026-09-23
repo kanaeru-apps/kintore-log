@@ -120,7 +120,7 @@
   setAudioSessionType(AUDIO_SESSION_IDLE);
 
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
-  var PART_CLASS = { '胸': 'chest', '背中': 'back', '脚': 'leg', '肩': 'shoulder', '腕': 'arm', '腹': 'core', '有酸素': 'cardio', 'その他': 'etc' };
+  var PART_CLASS = { '胸': 'chest', '背中': 'back', '脚': 'leg', '肩': 'shoulder', '腕': 'arm', '腹': 'core', '体幹': 'trunk', '有酸素': 'cardio', 'その他': 'etc' };
   var CARDIO_PART = '有酸素';
   /* 有酸素カードで表示する記録項目（時間は時/分/秒ホイールの専用ボタンで別扱い） */
   var CARDIO_FIELDS = [
@@ -152,6 +152,7 @@
   function hasZone(e) {
     return isCardio(e) && e.sets.some(function (s) { return zoneOf(s); });
   }
+  function isCore(e) { return e && e.part === '体幹'; }
   function isCardio(e) { return e && e.part === CARDIO_PART; }
   /* 時間(分)+秒 を「1時間05分30秒」のように整形。未入力ならnull */
   function fmtCardioTime(s) {
@@ -198,10 +199,11 @@
     return sets.reduce(function (a, s) { return a + ((+s.w || 0) * (+s.r || 0)); }, 0);
   }
   function workoutVol(w) {
-    return (w.entries || []).reduce(function (a, e) { return a + setVol(e.sets); }, 0);
+    return (w.entries || []).reduce(function (a, e) { return a + (isCore(e) || isCardio(e) ? 0 : setVol(e.sets)); }, 0);
   }
   /* 何か1項目でも入力されたセットだけを「実施セット」として数える（有酸素は7項目のいずれか） */
   function filledSets(e) {
+    if (isCore(e)) return e.sets.filter(function (s) { return DB.coreSetStats(e, s).complete > 0; });
     if (isCardio(e)) {
       return e.sets.filter(function (s) {
         return CARDIO_KEYS_ALL.some(function (k) { return (+s[k] || 0) > 0; });
@@ -213,12 +215,16 @@
     return (w.entries || []).reduce(function (a, e) { return a + filledSets(e).length; }, 0);
   }
   function dayStats(w) {
-    var st = { ex: 0, sets: 0, reps: 0, vol: 0, time: 0, dist: 0, hasStr: false, hasCardio: false };
+    var st = { ex: 0, sets: 0, reps: 0, vol: 0, time: 0, dist: 0, hasStr: false, hasCardio: false, hasCore: false, coreSeconds: 0, coreReps: 0 };
     ((w && w.entries) || []).forEach(function (e) {
       var f = filledSets(e);
       if (f.length) st.ex++;
       st.sets += f.length;
-      if (isCardio(e)) {
+      if (isCore(e)) {
+        var ct = DB.coreTotals(e);
+        st.hasCore = true;
+        st.coreSeconds += ct.seconds; st.coreReps += ct.reps;
+      } else if (isCardio(e)) {
         if (f.length) st.hasCardio = true;
         f.forEach(function (s) {
           // 分(t)だけを足すとインターバルの30秒・90秒がすべて0分になってしまうため秒(ts)も含める
@@ -266,6 +272,7 @@
 
   /* ---------- 人体図SVG（自作・部位ハイライト） ---------- */
   function bodySvg(part) {
+    if (part === '体幹') part = '腹';
     var hl = {
       '胸': 'seg-chest', '背中': 'seg-back', '肩': 'seg-shoulder',
       '腕': 'seg-arm', '腹': 'seg-core', '脚': 'seg-leg'
@@ -362,6 +369,7 @@
     } else {
       html += '<p class="video-note">（種目リストから削除された種目のため、URL登録はできません）</p>';
     }
+    if (master && isCore(master)) html += coreFields('infoCore', master) + '<p class="core-hint">変更は次に追加する記録から適用されます。過去・入力中の記録はそのまま残ります。</p>';
     $('#exModalBody').innerHTML = html;
     $('#exModalBackdrop').classList.add('show');
     $('#exModal').scrollTop = 0;
@@ -439,7 +447,10 @@
       if (!infoExId) return;
       var ex = DB.getExercise(infoExId);
       if (!ex) return;
-      if (e.target.id === 'exVideoInput') {
+      if (e.target.id === 'infoCoreMode' || e.target.id === 'infoCoreSide') {
+        DB.updateExercise(infoExId, readCoreFields('infoCore'));
+        toast('次に追加する記録から適用します');
+      } else if (e.target.id === 'exVideoInput') {
         var v = e.target.value.trim();
         var safe = safeHttpsUrl(v);
         if (v && !safe) {
@@ -1126,7 +1137,8 @@
     var tiles = statTile('合計種目数', st.ex) + statTile('合計セット数', st.sets);
     if (st.hasStr) tiles += statTile('合計レップ数', st.reps) + statTile('合計負荷量', fmtNum(st.vol), 'kg');
     if (st.hasCardio) tiles += statTile('合計時間', fmtNum(st.time), '分') + statTile('合計距離', fmtNum(st.dist), 'km');
-    if (!st.hasStr && !st.hasCardio) tiles += statTile('合計レップ数', 0) + statTile('合計負荷量', 0, 'kg');
+    if (st.hasCore) tiles += statTile('体幹 合計時間', fmtSeconds(st.coreSeconds)) + statTile('体幹 合計回数', st.coreReps, '回');
+    if (!st.hasStr && !st.hasCardio && !st.hasCore) tiles += statTile('合計レップ数', 0) + statTile('合計負荷量', 0, 'kg');
     $('#dayStats').innerHTML = tiles;
   }
 
@@ -1166,8 +1178,51 @@
     if (keepScrollY !== null) window.scrollTo(0, keepScrollY);
   }
 
+  var CORE_MODES = { time: '時間（秒）', reps: '回数', hold: '保持時間 × 回数' };
+  function coreFields(prefix, e) {
+    var cfg = DB.coreConfig(e || {});
+    return '<div class="core-options"><label>記録方式<select id="' + prefix + 'Mode">' + Object.keys(CORE_MODES).map(function (m) {
+      return '<option value="' + m + '"' + (m === cfg.mode ? ' selected' : '') + '>' + CORE_MODES[m] + '</option>';
+    }).join('') + '</select></label><label>左右の区別<select id="' + prefix + 'Side"><option value="no">なし</option><option value="yes"' + (cfg.side ? ' selected' : '') + '>左右別</option></select></label></div>';
+  }
+  function readCoreFields(prefix) { return { coreMode: $('#' + prefix + 'Mode').value, coreSide: $('#' + prefix + 'Side').value === 'yes' }; }
+  function coreRowsText(e) {
+    var cfg = DB.coreConfig(e);
+    return (e.sets || []).map(function (s) {
+      return (cfg.side ? ['', 'right'] : ['']).map(function (side) {
+        var t = DB.coreValue(s[side ? 'rightSeconds' : 'seconds']);
+        var r = DB.coreValue(s[side ? 'rightReps' : 'reps']);
+        return (cfg.side ? (side ? '右 ' : '左 ') : '') + (cfg.mode === 'time' ? (t || '—') + '秒' : cfg.mode === 'reps' ? (r || '—') + '回' : (t || '—') + '秒 × ' + (r || '—') + '回');
+      }).join(' / ');
+    }).join(' ・ ');
+  }
+  function coreTotalText(e) {
+    var t = DB.coreTotals(e), cfg = DB.coreConfig(e);
+    return t.sets + 'セット' + (t.partial ? '（片側のみ ' + t.partial + '）' : '') +
+      (cfg.mode !== 'reps' ? ' ／ 合計' + (cfg.mode === 'hold' ? '保持 ' : ' ') + fmtSeconds(t.seconds) : '') +
+      (cfg.mode !== 'time' ? ' ／ ' + t.reps + '回' : '') + (t.pending ? ' ／ 保持時間・回数の未入力あり' : '');
+  }
+  function coreEntryHtml(e, i) {
+    var cfg = DB.coreConfig(e);
+    var input = function (s, field, label, unit) {
+      return '<label class="core-input">' + label + '<span><input type="number" inputmode="numeric" min="0" max="86400" step="1" data-field="' + field + '" value="' + esc(s[field] == null ? '' : s[field]) + '" placeholder="—" aria-label="' + label + '"><small>' + unit + '</small></span></label>';
+    };
+    var rows = e.sets.map(function (s, n) {
+      var fields = (cfg.side ? ['', 'right'] : ['']).map(function (side) {
+        var prefix = cfg.side ? (side ? '右 ' : '左 ') : '';
+        return '<div class="core-measures">' + (cfg.mode !== 'reps' ? input(s, side ? 'rightSeconds' : 'seconds', prefix + (cfg.mode === 'hold' ? '1回の保持時間' : '実施時間'), '秒') : '') +
+          (cfg.mode !== 'time' ? input(s, side ? 'rightReps' : 'reps', prefix + '回数', '回') : '') + '</div>';
+      }).join('');
+      return '<div class="core-set" data-idx="' + n + '"><div class="core-set-head"><span>セット ' + (n + 1) + '</span><button class="link danger" data-action="del-set" aria-label="セット' + (n + 1) + 'を削除">削除</button></div>' + fields + '</div>';
+    }).join('');
+    return '<article class="entry core-entry" data-entry="' + e.id + '">' + entryHead(e) +
+      '<p class="core-hint">' + CORE_MODES[cfg.mode] + (cfg.side ? ' ・ 左右で1セット、回数は片側ずつ' : '') + '</p>' + prevLine(e) +
+      '<div class="sets">' + rows + '</div><div class="entry-foot"><button class="btn ghost small" data-action="add-set">＋ セット追加</button>' +
+      '<button class="btn ghost small" data-action="duplicate-core">最終セットを複製</button><span class="vol">' + coreTotalText(e) + '</span></div></article>';
+  }
+
   function entryHtml(e, i) {
-    return isCardio(e) ? cardioEntryHtml(e, i) : strengthEntryHtml(e, i);
+    return isCore(e) ? coreEntryHtml(e, i) : isCardio(e) ? cardioEntryHtml(e, i) : strengthEntryHtml(e, i);
   }
 
   /* カード見出し（部位チップ・種目名・削除ボタン）は共通 */
@@ -1183,7 +1238,9 @@
     if (!prev) return '';
     var pd = parseDate(prev.date);
     var body;
-    if (isCardio(e)) {
+    if (isCore(e)) {
+      body = coreRowsText({ sets: prev.sets, coreMode: prev.coreMode, coreSide: prev.coreSide });
+    } else if (isCardio(e)) {
       body = cardioPrevBody(prev.sets);
     } else {
       body = prev.sets.map(function (s) { return esc(s.w || 0) + '×' + esc(s.r || 0); }).join(' / ');
@@ -1515,6 +1572,9 @@
           DB.removeEntry(ui.date, id);
           renderLog();
         }
+      } else if (a === 'duplicate-core') {
+        DB.addSet(ui.date, id, true);
+        renderLog();
       } else if (a === 'add-set') {
         DB.addSet(ui.date, id);
         renderLog();
@@ -1586,6 +1646,7 @@
       var rowEl = e.target.closest('[data-idx]');
       if (!entryEl || !rowEl) return;
       var v = (input.value === '') ? '' : Math.max(0, parseFloat(input.value) || 0);
+      if (entryEl.classList.contains('core-entry') && v !== '') v = Math.min(86400, Math.floor(v));
       DB.updateSet(ui.date, entryEl.dataset.entry, +rowEl.dataset.idx, input.dataset.field, v);
       checkRecordToast(entryEl.dataset.entry);
       // 「5.30」→「5.3」、「-3」→「0」のように、保存された値を表示にも反映する（従来は再描画が担っていた）
@@ -1601,6 +1662,7 @@
     var w = DB.getWorkout(ui.date);
     renderDayStats(w);
     var e = ((w && w.entries) || []).filter(function (x) { return x.id === entryEl.dataset.entry; })[0];
+    if (isCore(e)) { var coreTotal = entryEl.querySelector('.entry-foot .vol'); if (coreTotal) coreTotal.textContent = coreTotalText(e); return; }
     if (!e || !isCardio(e)) return;
     var t = cardioTotals(e);
 
@@ -1688,6 +1750,8 @@
     $('#sheetEditBar').classList.toggle('show', ui.sheetEdit);
 
     // 新規作成フォームの器具ドロップダウン（初回のみ生成）
+    $('#sheetCoreFields').hidden = ui.pickerPart !== '体幹';
+    if (!$('#sheetCoreMode')) $('#sheetCoreFields').innerHTML = coreFields('sheetCore');
     var eqSel = $('#sheetNewEquip');
     if (!eqSel.options.length) eqSel.innerHTML = equipOptions();
   }
@@ -1800,7 +1864,7 @@
         toast('「' + name + (equip ? '（' + equip + '）' : '') + '」はすでに登録されています');
         return;
       }
-      var ex = DB.addExercise(name, ui.pickerPart, equip);
+      var ex = DB.addExercise(name, ui.pickerPart, equip, ui.pickerPart === '体幹' ? readCoreFields('sheetCore') : null);
       DB.addEntry(ui.date, ex.id);
       $('#sheetNewName').value = '';
       $('#sheetNewEquip').value = '';
@@ -1947,7 +2011,9 @@
             '<span class="h-wd">(' + WD[d.getDay()] + ')</span>' +
             '<span class="h-parts">' + parts.map(partChip).join('') + '</span>' +
           '</div>' +
-          '<div class="h-meta">' + (w.entries || []).length + '種目 · ' + workoutSets(w) + 'セット · VOL <b class="num">' + fmtNum(workoutVol(w)) + '</b> kg</div>' +
+          '<div class="h-meta">' + (w.entries || []).length + '種目 · ' + workoutSets(w) + 'セット' +
+            (dayStats(w).hasStr ? ' · VOL <b class="num">' + fmtNum(workoutVol(w)) + '</b> kg' : '') +
+            (dayStats(w).hasCore ? ' · 体幹 ' + fmtSeconds(dayStats(w).coreSeconds) + ' / ' + dayStats(w).coreReps + '回' : '') + '</div>' +
         '</button>' +
         (open ? hBodyHtml(w) : '') +
       '</div>';
@@ -1959,7 +2025,7 @@
     var rows = (w.entries || []).map(function (e) {
       // 有酸素は記録カードの前回行と同じ要約（cardioPrevBody）を使う。
       // インターバルだと16セッションが並んで読めなくなるうえ、分(t)だけ見ると30秒が0分と出てしまうため
-      var setsHtml = isCardio(e)
+      var setsHtml = isCore(e) ? coreRowsText(e) : isCardio(e)
         ? (cardioPrevBody(e.sets) || '—')
         : esc(e.sets.map(function (s) { return (s.w || 0) + '×' + (s.r || 0); }).join(' / ') || '—');
       return '<div class="h-entry">' + partChip(e.part) + '<b>' + esc(e.name) + '</b>' + equipTag(e.equip) +
@@ -2051,6 +2117,8 @@
         return '<option value="' + esc(p) + '">' + esc(p) + '</option>';
       }).join('');
     }
+    $('#newCoreFields').hidden = sel.value !== '体幹';
+    if (!$('#newCoreMode')) $('#newCoreFields').innerHTML = coreFields('newCore');
     var eqSel = $('#newExEquip');
     if (!eqSel.options.length) eqSel.innerHTML = equipOptions();
 
@@ -2147,13 +2215,18 @@
     if (nativeRestorePending) return Promise.resolve(false);
     var json = DB.exportStateJSON();
     if (!json) return Promise.resolve(false);
-    return fsPlugin.writeFile({
+    var preCore = localStorage.getItem(DB.PRE_CORE_KEY);
+    // A restored installation may have a fresh localStorage snapshot. Keep the existing native rollback file.
+    var preserve = preCore ? fsPlugin.readFile({ path: 'kintore-pre-core-20260923.json', directory: 'DOCUMENTS', encoding: 'utf8' }).catch(function () {
+      return fsPlugin.writeFile({ path: 'kintore-pre-core-20260923.json', data: preCore, directory: 'DOCUMENTS', encoding: 'utf8', recursive: true });
+    }) : Promise.resolve();
+    return preserve.then(function () { return fsPlugin.writeFile({
       path: NATIVE_BACKUP_FILE,
       data: json,
       directory: 'DOCUMENTS',
       encoding: 'utf8',
       recursive: true
-    }).then(function () {
+    }); }).then(function () {
       try { localStorage.setItem(NATIVE_BACKUP_AT_KEY, new Date().toISOString()); } catch (e) { /* noop */ }
       renderStorageInfo();
       return true;
@@ -3000,7 +3073,30 @@
   }
 
 
+  async function exportPreCoreBackup() {
+    var json = localStorage.getItem(DB.PRE_CORE_KEY);
+    if (!json) { toast('変更前のバックアップはありません'); return; }
+    var fileName = 'kintore-pre-core-20260923.json';
+    if (isNativeApp()) {
+      try {
+        var plugin = nativePlugin('Filesystem');
+        if (!plugin) throw new Error('Filesystem unavailable');
+        try { await plugin.readFile({ path: fileName, directory: 'DOCUMENTS', encoding: 'utf8' }); }
+        catch (missing) { await plugin.writeFile({ path: fileName, data: json, directory: 'DOCUMENTS', encoding: 'utf8', recursive: true }); }
+        toast('端末内のDocumentsに変更前のJSONを保存しました');
+      } catch (e) { toast('変更前のJSONを保存できませんでした'); }
+      return;
+    }
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+    a.download = fileName; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    toast('変更前のJSONのダウンロードを開始しました');
+  }
+
   function bindSettings() {
+    $('#exportPreCoreBtn').onclick = exportPreCoreBackup;
+    $('#newExPart').addEventListener('change', function () { $('#newCoreFields').hidden = this.value !== '体幹'; });
     $('#weightStepList').addEventListener('click', function (e) {
       var row = e.target.closest('[data-wstep]');
       if (!row) return;
@@ -3024,7 +3120,7 @@
         toast('「' + name + (equip ? '（' + equip + '）' : '') + '」はすでに登録されています');
         return;
       }
-      DB.addExercise(name, part, equip);
+      DB.addExercise(name, part, equip, part === '体幹' ? readCoreFields('newCore') : null);
       $('#newExName').value = '';
       $('#newExEquip').value = '';
       // 追加した部位だけを開いた状態にする（他は閉じる）
@@ -3110,7 +3206,7 @@
   var ROW_HEAD = ['日付', '曜日', '部位', '種目', '器具', 'セット',
     '重量kg', '回数', 'ボリュームkg',
     '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ', '強度',
-    'データ種別', '参考動画URL', 'フォームメモ'];
+    'データ種別', '参考動画URL', 'フォームメモ', '体幹記録方式', '体幹左右別', '体幹秒', '体幹回数', '体幹右秒', '体幹右回数'];
   var CSV_ROW_WORKOUT = '記録';
   var CSV_ROW_EXERCISE = '種目マスター';
   /* 指定日の記録をROW_HEADと同じ並びの行配列に変換する。記録が無ければ空配列 */
@@ -3122,12 +3218,13 @@
     var rows = [];
     (w.entries || []).forEach(function (e) {
       var cardio = isCardio(e);
+      var core = isCore(e);
       e.sets.forEach(function (s, i) {
         rows.push([
           date, WD[d.getDay()], e.part, e.name, e.equip || '', i + 1,
-          cardio ? '' : val(s.w),
-          cardio ? '' : val(s.r),
-          cardio ? '' : (+s.w || 0) * (+s.r || 0),
+          cardio || core ? '' : val(s.w),
+          cardio || core ? '' : val(s.r),
+          cardio || core ? '' : (+s.w || 0) * (+s.r || 0),
           cardio ? val(s.t) : '',
           cardio ? val(s.ts) : '',
           cardio ? val(s.d) : '',
@@ -3137,7 +3234,9 @@
           cardio ? val(s.hr) : '',
           w.memo || '',
           cardio ? zoneCsv(zoneOf(s)) : '',
-          CSV_ROW_WORKOUT, '', ''
+          CSV_ROW_WORKOUT, '', '',
+          core ? DB.coreConfig(e).mode : '', core ? (DB.coreConfig(e).side ? '左右別' : 'なし') : '',
+          core ? val(s.seconds) : '', core ? val(s.reps) : '', core ? val(s.rightSeconds) : '', core ? val(s.rightReps) : ''
         ]);
       });
     });
@@ -3151,7 +3250,8 @@
       return [
         '', '', ex.part, ex.name, ex.equip || '',
         '', '', '', '', '', '', '', '', '', '', '', '', '',
-        CSV_ROW_EXERCISE, safeHttpsUrl(ex.video), limitedText(ex.note, INPUT_LIMITS.exerciseNote)
+        CSV_ROW_EXERCISE, safeHttpsUrl(ex.video), limitedText(ex.note, INPUT_LIMITS.exerciseNote),
+        isCore(ex) ? DB.coreConfig(ex).mode : '', isCore(ex) ? (DB.coreConfig(ex).side ? '左右別' : 'なし') : '', '', '', '', ''
       ];
     });
   }
@@ -3211,7 +3311,7 @@
   /* ROW_HEADの見出し文字列 → 内部キー。列の並びが変わっていてもヘッダー名で判定する */
   var IMPORT_KEYS = ['date', 'wd', 'part', 'name', 'equip', 'setNo',
     'w', 'r', 'vol', 't', 'ts', 'd', 'sp', 'inc', 'cal', 'hr', 'memo', 'z',
-    'rowType', 'video', 'exerciseNote'];
+    'rowType', 'video', 'exerciseNote', 'coreMode', 'coreSide', 'seconds', 'reps', 'rightSeconds', 'rightReps'];
   var IMPORT_HEADER_KEY = ROW_HEAD.reduce(function (m, h, i) { m[h] = IMPORT_KEYS[i]; return m; }, {});
   var PREIMPORT_BACKUP_KEY = 'kintore_v1_preimport_backup';
   var CSV_LIMITS = {
@@ -3306,6 +3406,11 @@
       if (!part || !name) throw csvError(rowNo + '行目の部位・種目を確認してください');
       if (DB.PARTS.indexOf(part) < 0) throw csvError(rowNo + '行目の部位が不正です');
 
+      var coreCfg = null;
+      if (part === '体幹') {
+        if (['time', 'reps', 'hold'].indexOf(rec.coreMode) < 0 || ['左右別', 'なし'].indexOf(rec.coreSide) < 0) throw csvError(rowNo + '行目の体幹記録方式・左右別を確認してください');
+        coreCfg = { coreMode: rec.coreMode, coreSide: rec.coreSide === '左右別' };
+      }
       if (rowType === CSV_ROW_EXERCISE) {
         var videoRaw = limitedText(rec.video, INPUT_LIMITS.videoUrl).trim();
         var video = safeHttpsUrl(videoRaw);
@@ -3318,6 +3423,7 @@
           video: video,
           note: limitedText(rec.exerciseNote, INPUT_LIMITS.exerciseNote)
         };
+        if (coreCfg) { master.coreMode = coreCfg.coreMode; master.coreSide = coreCfg.coreSide; }
         if (exerciseIndex[exerciseKey] === undefined) {
           exerciseIndex[exerciseKey] = exercises.length;
           exercises.push(master);
@@ -3342,6 +3448,10 @@
         dayObj.order.push(entryKey);
       }
       var entryObj = dayObj.entries[entryKey];
+      if (coreCfg) {
+        if (entryObj.coreMode && (entryObj.coreMode !== coreCfg.coreMode || entryObj.coreSide !== coreCfg.coreSide)) throw csvError(rowNo + '行目の同一種目で体幹記録方式が混在しています');
+        entryObj.coreMode = coreCfg.coreMode; entryObj.coreSide = coreCfg.coreSide;
+      }
       var setNoText = String(rec.setNo == null ? '' : rec.setNo).trim();
       var setNo = setNoText ? importNumber(setNoText, 'セット番号', rowNo, 1, CSV_LIMITS.setNo) : entryObj.sets.length + 1;
       if (Math.floor(setNo) !== setNo) throw csvError(rowNo + '行目のセット番号は整数で入力してください');
@@ -3361,6 +3471,14 @@
             w: importNumber(rec.w, '重量', rowNo, 0, 10000),
             r: importNumber(rec.r, '回数', rowNo, 0, 100000)
           };
+      if (coreCfg) {
+        setObj = {};
+        ['seconds', 'reps', 'rightSeconds', 'rightReps'].forEach(function (k) {
+          var n = importNumber(rec[k], k, rowNo, 0, 86400);
+          if (n !== '' && !Number.isInteger(n)) throw csvError(rowNo + '行目の体幹の秒数・回数は整数にしてください');
+          setObj[k] = n;
+        });
+      }
       entryObj.sets[setNo - 1] = setObj;
     }
     return { dateOrder: dateOrder, byDate: byDate, rowCount: rowCount, exercises: exercises };
