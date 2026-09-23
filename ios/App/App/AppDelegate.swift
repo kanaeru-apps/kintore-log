@@ -3,6 +3,8 @@ import AVFoundation
 import AudioToolbox
 import UserNotifications
 import Capacitor
+import AlarmKit
+import SwiftUI
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -463,5 +465,112 @@ public class AlarmAudioPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioPlayerDelegat
 open class MainViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(AlarmAudioPlugin())
+        bridge?.registerPluginInstance(RestAlarmPlugin())
+    }
+}
+
+@available(iOS 26.0, *)
+private struct RestAlarmMetadata: AlarmMetadata {}
+
+/// 固定時刻のアラームを予約する。カウントダウン表示は既存のアプリ画面が担当する。
+@objc(RestAlarmPlugin)
+public class RestAlarmPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "RestAlarmPlugin"
+    public let jsName = "RestAlarm"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "status", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "schedule", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "cancel", returnType: CAPPluginReturnPromise)
+    ]
+    // MainActor上だけで操作。許可待ち中の一時停止・再予約が古い予約を復活させない。
+    private var revision = 0
+    private let idsKey = "kintore_alarmkit_ids"
+
+    @MainActor private func savedIDs() -> [UUID] {
+        (UserDefaults.standard.stringArray(forKey: idsKey) ?? []).compactMap(UUID.init(uuidString:))
+    }
+
+    @available(iOS 26.0, *)
+    @MainActor private func cancelSaved() throws {
+        guard !savedIDs().isEmpty else { return }
+        let live = try AlarmManager.shared.alarms
+        for id in savedIDs() where live.contains(where: { $0.id == id }) {
+            try AlarmManager.shared.cancel(id: id)
+        }
+        UserDefaults.standard.removeObject(forKey: idsKey)
+    }
+
+    @objc public func status(_ call: CAPPluginCall) {
+        Task { @MainActor in
+            guard #available(iOS 26.0, *) else {
+                call.resolve(["supported": false]); return
+            }
+            let state = AlarmManager.shared.authorizationState
+            call.resolve(["supported": true, "authorized": state == .authorized,
+                          "denied": state == .denied])
+        }
+    }
+
+    @objc public func cancel(_ call: CAPPluginCall) {
+        Task { @MainActor in
+            self.revision += 1
+            guard #available(iOS 26.0, *) else { call.resolve(); return }
+            do { try self.cancelSaved(); call.resolve() }
+            catch { call.reject("アラームを停止できませんでした", nil, error) }
+        }
+    }
+
+    @objc public func schedule(_ call: CAPPluginCall) {
+        Task { @MainActor in
+            self.revision += 1
+            let ticket = self.revision
+            guard #available(iOS 26.0, *) else {
+                call.resolve(["ok": false, "reason": "unsupported"]); return
+            }
+            guard let ms = call.getDouble("endAt"), ms.isFinite,
+                  ms > Date().timeIntervalSince1970 * 1000 else {
+                call.resolve(["ok": false, "reason": "expired"]); return
+            }
+            do {
+                try self.cancelSaved()
+                var permission = AlarmManager.shared.authorizationState
+                if permission == .notDetermined {
+                    permission = try await AlarmManager.shared.requestAuthorization()
+                }
+                guard ticket == self.revision else {
+                    call.resolve(["ok": false, "reason": "superseded"]); return
+                }
+                guard permission == .authorized else {
+                    call.resolve(["ok": false, "reason": "denied"]); return
+                }
+                guard ms > Date().timeIntervalSince1970 * 1000 else {
+                    call.resolve(["ok": false, "reason": "expired"]); return
+                }
+                let id = UUID()
+                let button = AlarmButton(text: "停止", textColor: .white, systemImageName: "stop.circle")
+                let attributes = AlarmAttributes<RestAlarmMetadata>(
+                    presentation: AlarmPresentation(alert: AlarmPresentation.Alert(
+                        title: "休憩終了！ 次のセットへ", stopButton: button)),
+                    metadata: RestAlarmMetadata(), tintColor: .green)
+                let allowed = ["beep", "bell", "chime", "digital", "soft"]
+                let requested = call.getString("sound") ?? "beep"
+                let sound = allowed.contains(requested) ? requested : "beep"
+                let configuration = AlarmManager.AlarmConfiguration<RestAlarmMetadata>.alarm(
+                    schedule: .fixed(Date(timeIntervalSince1970: ms / 1000)),
+                    attributes: attributes, sound: .named(sound + ".wav"))
+                // 再起動後にも停止できるよう、予約中のIDも先に保存する。
+                UserDefaults.standard.set(self.savedIDs().map(\.uuidString) + [id.uuidString], forKey: self.idsKey)
+                _ = try await AlarmManager.shared.schedule(id: id, configuration: configuration)
+                guard ticket == self.revision else {
+                    try AlarmManager.shared.cancel(id: id)
+                    call.resolve(["ok": false, "reason": "superseded"]); return
+                }
+                // JSが背面で停止しても二重通知にならないようネイティブ側で取り消す。
+                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["1"])
+                call.resolve(["ok": true])
+            } catch {
+                call.reject("アラームを予約できませんでした", nil, error)
+            }
+        }
     }
 }

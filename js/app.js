@@ -2511,6 +2511,18 @@
   /* 許可とiOS設定を読み直して警告を出し直す */
   function refreshNotifWarning() {
     if (!isNativeApp()) return Promise.resolve();
+    if (wantsRestAlarm() && restAlarmState.supported) {
+      var sequence = restAlarmState.sequence;
+      var plugin = nativePlugin('RestAlarm');
+      return plugin.status().then(function (state) {
+        restAlarmState.supported = state.supported;
+        if (!wantsRestAlarm() || sequence !== restAlarmState.sequence) return;
+        renderNotifWarning(state.denied ? {
+          title: 'アラームが許可されていません',
+          body: 'タップしてiPhoneの設定でアラームを許可してください。通常の通知では消音中に音が鳴りません'
+        } : restAlarmState.warning);
+      }).catch(function () { /* 予約時のエラー表示を維持する */ });
+    }
     /* ここも許可を聞き直すので、診断欄の「許可」を書く資格を取ってから始める。
        取れなかったときに前の値を書き戻すのは、
        ①元々「取れなければ前の値を残す」仕様だったのを変えないため
@@ -2525,6 +2537,7 @@
       .then(function (r) { return r || null; }, function () { return null; })
       : Promise.resolve(null);
     return Promise.all([permP, iosP]).then(function (v) {
+      if (wantsRestAlarm() && restAlarmState.supported) return;
       writeDiag('perm', permToken, v[0] || soundDiag.perm);
       renderNotifWarning(describeNotifBlock(v[0], v[1]));
     }, function () { /* noop */ });
@@ -2793,7 +2806,81 @@
      先に出しておいて後から出し直しても二重に鳴ることはない。
      予約前に cancel していたのもやめた（cancel の完了を待っていなかったため、
      順序が入れ替わると予約したばかりの通知を自分で消す可能性があった）。 */
+  var restAlarmState = { supported: false, sequence: 0, key: '', endAt: 0, warning: null };
+  function wantsRestAlarm() {
+    return isNativeApp() && timerSettings.notifyOn && timerSettings.soundOn && timerSettings.ignoreSilent;
+  }
+  function initRestAlarm() {
+    if (!isNativeApp()) return;
+    var plugin = nativePlugin('RestAlarm');
+    if (plugin) plugin.status().then(function (state) {
+      restAlarmState.supported = !!state.supported;
+      if (restAlarmState.supported && timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
+    }).catch(function () { /* 旧ビルドは通常の通知を使う */ });
+  }
+  function cancelRestAlarm() {
+    restAlarmState.sequence++;
+    restAlarmState.key = '';
+    restAlarmState.endAt = 0;
+    restAlarmState.warning = null;
+    var plugin = isNativeApp() && nativePlugin('RestAlarm');
+    if (!plugin || !restAlarmState.supported) return Promise.resolve();
+    return plugin.cancel().catch(function (e) {
+      renderNotifWarning({ title: 'アラームの停止を確認できません', body: 'iPhoneに表示されるアラームの停止ボタンも押してください' });
+      noteAppError('アラーム停止', e);
+    });
+  }
   function scheduleTimerNotification(endAtMs) {
+    if (!isNativeApp()) return;
+    if (endAtMs <= Date.now()) { cancelTimerNotification(); return; }
+    var plugin = nativePlugin('RestAlarm');
+    if (!wantsRestAlarm() || !plugin || !restAlarmState.supported) {
+      cancelRestAlarm();
+      scheduleLegacyTimerNotification(endAtMs);
+      return;
+    }
+    var key = endAtMs + ':' + timerSettings.sound;
+    if (restAlarmState.key === key) return; // 背面への切り替えで同じ予約を作り直さない
+    var sequence = ++restAlarmState.sequence;
+    restAlarmState.key = key;
+    restAlarmState.endAt = 0;
+    restAlarmState.warning = null;
+    cancelLegacyTimerNotification();
+    plugin.schedule({ endAt: endAtMs, sound: timerSettings.sound }).then(function (result) {
+      if (sequence !== restAlarmState.sequence) return;
+      if (result.ok) {
+        restAlarmState.endAt = endAtMs;
+        renderNotifWarning(null);
+        // 許可操作中に終了した場合も、アプリ音とOSアラームを重ねない。
+        if (timer.finished) { stopBeep(); stopVibrate(); }
+        return;
+      }
+      if (result.reason === 'superseded') return;
+      if (result.reason === 'expired') {
+        restAlarmState.key = '';
+        if (timer.finished && timer.endAt === endAtMs) { playAlarmSound(); vibrateAlarm(); }
+        return;
+      }
+      restAlarmState.key = '';
+      restAlarmState.warning = {
+        title: '消音中に鳴らすにはアラームの許可が必要です',
+        body: 'タップしてiPhoneの設定で許可してください。今回は通常の通知でお知らせします'
+      };
+      renderNotifWarning(restAlarmState.warning);
+      if (timer.running && !timer.paused && timer.endAt === endAtMs) scheduleLegacyTimerNotification(endAtMs);
+      else if (timer.finished && timer.endAt === endAtMs) { playAlarmSound(); vibrateAlarm(); }
+    }).catch(function (e) {
+      if (sequence !== restAlarmState.sequence) return;
+      restAlarmState.key = '';
+      restAlarmState.warning = { title: 'アラームを予約できませんでした', body: '今回は通常の通知を使います。消音中は音が鳴りません' };
+      renderNotifWarning(restAlarmState.warning);
+      noteAppError('アラーム予約', e);
+      if (timer.running && !timer.paused && timer.endAt === endAtMs) scheduleLegacyTimerNotification(endAtMs);
+      else if (timer.finished && timer.endAt === endAtMs) { playAlarmSound(); vibrateAlarm(); }
+    });
+  }
+  function scheduleLegacyTimerNotification(endAtMs) {
+    var alarmSequence = restAlarmState.sequence;
     if (!isNativeApp()) { writeSched(claimSched(), '—（ブラウザ版）'); return; }
     var ln = nativePlugin('LocalNotifications');
     if (!ln) { writeSched(claimSched(), 'NG: 通知プラグインが読み込まれていない'); return; }
@@ -2807,6 +2894,7 @@
     //    その間はアプリが前面なのでJSは止まらない。取れたら同じidで出し直す
     withTimeout(ensureNotifPermission(), PERM_WAIT_MS, null)
       .then(function (granted) {
+        if (alarmSequence !== restAlarmState.sequence) return;
         /* 許可が無いと分かった時点で、進行中の予約確認より新しい確定情報になる。
            番号を取り直して、あとから返る確認結果に上書きされないようにする。 */
         if (granted === false) { writeSched(claimSched(), 'NG: 通知が許可されていない'); return; }
@@ -2825,6 +2913,10 @@
 
   /* cancel が消すのは「まだ配信されていない予約」だけ。配信済みの通知には効かない。 */
   function cancelTimerNotification() {
+    cancelRestAlarm();
+    cancelLegacyTimerNotification();
+  }
+  function cancelLegacyTimerNotification() {
     var ln = nativePlugin('LocalNotifications');
     if (!ln) return;
     try {
@@ -3952,7 +4044,7 @@
        stopBeep() が即座に pause し、iOSに「この要素は再生許可済み」と認識されないことがある。 */
     stopBeep();
     unlockAudio();
-    askNotify();
+    if (!(wantsRestAlarm() && restAlarmState.supported)) askNotify();
     clearBadge();
     clearDeliveredTimerNotification(); // 前回のお知らせを通知センターから片づける
     stopVibrate();
@@ -3985,8 +4077,10 @@
        （アプリを開いたまま待っているとバナーが出ないのはこれが原因だった）
        「−30秒」などで終了時刻より手前に終わらせた場合だけ取り消す。 */
     if (timer.endAt - Date.now() > 1500) cancelTimerNotification();
-    playAlarmSound();
-    vibrateAlarm();
+    if (restAlarmState.endAt !== timer.endAt && restAlarmState.key !== timer.endAt + ':' + timerSettings.sound) {
+      playAlarmSound();
+      vibrateAlarm();
+    }
     showTimerNotification();
     setBadge();
     setTimerView('finished');
@@ -4191,7 +4285,9 @@
     $('#rowIgnoreSilent').hidden = !(isNativeApp() || canPickAudioSession());
     $('#ignoreSilentLabel').textContent = nativeAudio ? '消音モードでも鳴らす' : 'タイマー終了音を優先';
     $('#ignoreSilentNote').textContent = nativeAudio
-      ? 'アプリを開いているときのアラーム音のみ。閉じているときの通知音は iPhone の設定に従います'
+      ? (restAlarmState.supported
+        ? '音とシステム通知もオンにすると、ホーム画面・画面ロック中も鳴らします。初回にアラームの許可が必要です'
+        : 'アプリを表示中のみ有効です。画面ロック中やホーム画面で消音中にも鳴らすにはiOS 26以降が必要です')
       : '消音中やYouTube再生中も終了音を優先します。終了音の数秒間はYouTubeなどが止まる場合があります';
   }
   var timerSettingsBound = false;
@@ -4229,12 +4325,13 @@
       timerSettings.ignoreSilent = e.target.checked;
       saveTimerSettings();
       applySilentModeSetting();
+      if (timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
     });
     $('#toggleNotifyOn').addEventListener('change', function (e) {
       timerSettings.notifyOn = e.target.checked;
       saveTimerSettings();
       if (timerSettings.notifyOn) {
-        askNotify();
+        if (!(wantsRestAlarm() && restAlarmState.supported)) askNotify();
         // 計測中に通知をONにしたら、その回の終了時刻からちゃんと鳴るようにする
         if (timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
       } else {
@@ -4273,6 +4370,7 @@
   bindGen();
   bindRepsDrum();
   loadTimerSettings();
+  initRestAlarm();
   bindTimerSettingsOnce();
   loadWeightStepSettings();
   initTheme();
