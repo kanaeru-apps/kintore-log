@@ -21,8 +21,8 @@
 <!-- テーマの初期設定。CSSより先に <html data-theme> を決めておかないと、起動の一瞬だけ
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
-<script src="js/theme-init.js?v=0.14.0"></script>
-<link rel="stylesheet" href="css/style.css?v=0.14.0">
+<script src="js/theme-init.js?v=0.14.1"></script>
+<link rel="stylesheet" href="css/style.css?v=0.14.1">
 </head>
 <body>
 <div id="app">
@@ -286,7 +286,7 @@
         </div>
       </div>
 
-      <p class="version">筋トレLog v0.14.0 — 体幹追加版</p>
+      <p class="version">筋トレLog v0.14.1 — 体幹追加版</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -425,7 +425,7 @@
     <div class="drum-direct">
       <label for="drumDirectInput">数字で直接入力</label>
       <div class="drum-direct-row">
-        <input type="text" id="drumDirectInput" inputmode="decimal" placeholder="例: 62.5">
+        <input type="text" id="drumDirectInput" enterkeyhint="done" inputmode="decimal" placeholder="例: 62.5">
         <span class="drum-direct-unit">kg</span>
       </div>
     </div>
@@ -448,7 +448,7 @@
     <div class="drum-direct">
       <label for="repsDirectInput">数字で直接入力</label>
       <div class="drum-direct-row">
-        <input type="text" id="repsDirectInput" inputmode="numeric" pattern="[0-9]*" placeholder="例: 10">
+        <input type="text" id="repsDirectInput" enterkeyhint="done" inputmode="numeric" pattern="[0-9]*" placeholder="例: 10">
         <span class="drum-direct-unit">回</span>
       </div>
     </div>
@@ -541,9 +541,10 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.14.0"></script>
-<script src="js/app.js?v=0.14.0"></script>
-<script src="js/charts.js?v=0.14.0"></script>
-<script src="js/register-sw.js?v=0.14.0"></script>
+<div id="numberInputBar" hidden><span id="numberInputLabel"></span><button id="numberInputDone" type="button">完了</button></div>
+<script src="js/db.js?v=0.14.1"></script>
+<script src="js/app.js?v=0.14.1"></script>
+<script src="js/charts.js?v=0.14.1"></script>
+<script src="js/register-sw.js?v=0.14.1"></script>
 </body>
 </html>

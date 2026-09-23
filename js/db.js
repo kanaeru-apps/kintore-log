@@ -59,7 +59,7 @@ var DB = (function () {
     var l = relLum(bg);
     return (l + 0.05) / 0.05 >= 1.05 / (l + 0.05) ? cssVar('--ink', '#0b0c0f') : '#ffffff';
   }
-  var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重', 'アシスト', 'チューブ', 'バランスボール'];
+  var EQUIPS = ['バーベル', 'ダンベル', 'マシン', 'ケーブル', '自重', 'アシスト'];
   var CARDIO_PART = '有酸素';
   /* 有酸素セットのフィールド：時間(t/分)・秒(ts/0-59)・距離(d/km)・速度(sp/km/h)・傾斜(inc/%)・カロリー(cal/kcal)・心拍(hr/bpm)
      z はインターバルの強度ラベル（'hi'=WORK / 'rec'=REST / ''=タグなし）。他と違い数値ではなく文字列で、
@@ -79,9 +79,9 @@ var DB = (function () {
   var CORE_KEYS = ['seconds', 'reps', 'rightSeconds', 'rightReps'];
   var PRE_CORE_KEY = 'kintore_v1_pre_core_20260923';
   var CORE_DEFAULTS = [
-    ['プランク', 'time', false], ['サイドプランク', 'time', true],
-    ['ドローイン', 'hold', false], ['デッドバグ', 'reps', true],
-    ['バードドッグ', 'hold', true], ['パロフプレス', 'reps', true]
+    ['プランク', 'time', false], ['サイドプランク', 'time', false],
+    ['ドローイン', 'hold', false], ['デッドバグ', 'reps', false],
+    ['バードドッグ', 'hold', false], ['パロフプレス', 'reps', false]
   ];
   function coreConfig(e) {
     return { mode: ['time', 'reps', 'hold'].indexOf(e.coreMode) >= 0 ? e.coreMode : 'time', side: e.coreSide === true };
@@ -112,6 +112,36 @@ var DB = (function () {
     });
     return out;
   }
+  function singleCoreEntry(e) {
+    if (e.part !== CORE_PART || !e.coreSide) return;
+    // Preserve the original representation; never sum holding durations or discard a side.
+    e.legacyCoreSets = JSON.parse(JSON.stringify(e.sets || []));
+    var cfg = coreConfig(e);
+    var present = function (s, right) {
+      return (cfg.mode !== 'reps' && coreValue(s[right ? 'rightSeconds' : 'seconds']) > 0) ||
+        (cfg.mode !== 'time' && coreValue(s[right ? 'rightReps' : 'reps']) > 0);
+    };
+    e.sets = (e.sets || []).reduce(function (out, s) {
+      if (present(s, false) || !present(s, true)) out.push({ seconds: cp(s.seconds), reps: cp(s.reps) });
+      if (present(s, true)) out.push({ seconds: cp(s.rightSeconds), reps: cp(s.rightReps) });
+      return out;
+    }, []);
+    e.coreSide = false;
+  }
+  function migrateSingleCore() {
+    if (state.coreSingleSchema === 1) return;
+    var key = 'kintore_v1_pre_input_b_20260923';
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(state));
+    state.exercises.forEach(function (e) {
+      if (e.part === CORE_PART) e.coreSide = false;
+      if (e.equip === 'チューブ' || e.equip === 'バランスボール') { e.legacyEquip = e.equip; e.equip = ''; }
+    });
+    Object.keys(state.workouts).forEach(function (date) {
+      (state.workouts[date].entries || []).forEach(singleCoreEntry);
+    });
+    state.coreSingleSchema = 1;
+    save();
+  }
   function addCoreDefaults() {
     if (state.coreSchema === 1) return;
     // Back up the original state before any additive migration. Never overwrite the rollback copy.
@@ -120,7 +150,7 @@ var DB = (function () {
     if (!priorBackup || (!priorHasHistory && Object.keys(state.workouts).length > 0)) localStorage.setItem(PRE_CORE_KEY, JSON.stringify(state));
     CORE_DEFAULTS.forEach(function (d) {
       if (!state.exercises.some(function (x) { return x.part === CORE_PART && x.name === d[0]; })) {
-        state.exercises.push({ id: uid(), name: d[0], part: CORE_PART, equip: d[0] === 'パロフプレス' ? 'チューブ' : '自重', coreMode: d[1], coreSide: d[2] });
+        state.exercises.push({ id: uid(), name: d[0], part: CORE_PART, equip: d[0] === 'パロフプレス' ? '' : '自重', coreMode: d[1], coreSide: d[2] });
       }
     });
     state.coreSchema = 1;
@@ -234,6 +264,7 @@ var DB = (function () {
         if (s && s.exercises && s.workouts) {
           state = s;
           addCoreDefaults();
+          migrateSingleCore();
           migrate();
           if (!state.dirtyDates) {
             // 同期機能を導入する前からのデータ：初回同期で全履歴を送れるよう既存の記録日をすべてdirty扱いにする
@@ -264,6 +295,7 @@ var DB = (function () {
       deletedExercises: []
     };
     addCoreDefaults();
+    migrateSingleCore();
     save();
   }
 
@@ -397,7 +429,7 @@ var DB = (function () {
     findExercise: findExercise,
     addExercise: function (name, part, equip, core) {
       var ex = { id: uid(), name: name, part: part, equip: equip || '' };
-      if (part === CORE_PART) { var cfg = coreConfig(core || {}); ex.coreMode = cfg.mode; ex.coreSide = cfg.side; }
+      if (part === CORE_PART) { var cfg = coreConfig(core || {}); ex.coreMode = cfg.mode; ex.coreSide = false; }
       state.exercises.push(ex);
       // 以前に削除した種目と同じなら、削除の控えを取り消す（登録直後に消される事故を防ぐ）
       unmarkExerciseDeleted(part, name, equip || '');
@@ -591,7 +623,9 @@ var DB = (function () {
           var sets = d.sets.filter(function (s) { return !!s; }); // 歯抜け（セット番号の飛び）を除去
           if (!sets.length) sets = [emptySet(d.part)];
           var entry = { id: uid(), exId: ex.id, name: d.name, part: d.part, equip: d.equip || '', sets: sets };
-          if (d.part === CORE_PART) { var cfg = coreConfig(d); entry.coreMode = cfg.mode; entry.coreSide = cfg.side; ex.coreMode = cfg.mode; ex.coreSide = cfg.side; }
+          if (d.part === CORE_PART) { var cfg = coreConfig(d); entry.coreMode = cfg.mode; entry.coreSide = cfg.side; ex.coreMode = cfg.mode; ex.coreSide = false; }
+          singleCoreEntry(entry);
+          ex.coreSide = false;
           return entry;
         });
         w.memo = dayData.memo || '';
@@ -614,7 +648,8 @@ var DB = (function () {
         }
         // 復元した種目が、過去の削除控えによって後から消されないようにする
         unmarkExerciseDeleted(d.part, d.name, d.equip || '');
-        if (d.part === CORE_PART) { var cfg = coreConfig(d); ex.coreMode = cfg.mode; ex.coreSide = cfg.side; changed = true; }
+        if (ex.equip === 'チューブ' || ex.equip === 'バランスボール') { ex.legacyEquip = ex.equip; ex.equip = ''; }
+        if (d.part === CORE_PART) { var cfg = coreConfig(d); ex.coreMode = cfg.mode; ex.coreSide = false; changed = true; }
         if (overwriteMetadata) {
           var video = d.video || '';
           var note = d.note || '';
@@ -643,6 +678,7 @@ var DB = (function () {
         if (!s.deletedExercises) s.deletedExercises = [];
         state = s;
         addCoreDefaults();
+        migrateSingleCore();
         migrate();
         save();
         return true;

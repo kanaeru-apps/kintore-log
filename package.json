@@ -16,8 +16,9 @@
     "check:alarmkit": "node tools/alarmkit-check.js",
     "check:csv-export": "node tools/csv-export-check.js",
     "check:syntax": "node --check build-ios.js && node --check sw.js && node --check js/theme-init.js && node --check js/register-sw.js && node --check js/db.js && node --check js/app.js && node --check js/charts.js",
-    "verify": "npm run check:syntax && npm run security:scan && npm run check:data-backup && npm run check:upgrade && npm run check:alarmkit && npm run check:csv-export && npm run check:core && npm run build",
-    "check:core": "node tools/core-check.js"
+    "verify": "npm run check:syntax && npm run security:scan && npm run check:data-backup && npm run check:upgrade && npm run check:alarmkit && npm run check:csv-export && npm run check:core && npm run check:input-b && npm run build",
+    "check:core": "node tools/core-check.js",
+    "check:input-b": "node tools/input-b-check.js"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.0",

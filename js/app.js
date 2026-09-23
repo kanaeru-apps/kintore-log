@@ -469,6 +469,76 @@
     });
   }
 
+  var numberEditing = null;
+  var nativeNumberKeyboardHeight = 0;
+  function positionNumberEditing() {
+    if (!numberEditing) return;
+    var v = window.visualViewport;
+    var bottom = Math.max(nativeNumberKeyboardHeight, v ? window.innerHeight - v.height - v.offsetTop : 0, 0);
+    document.documentElement.style.setProperty('--number-keyboard-bottom', bottom + 'px');
+    if (numberEditing.closest('.core-entry')) {
+      var rect = numberEditing.getBoundingClientRect();
+      var visibleBottom = window.innerHeight - bottom - 64;
+      if (rect.bottom > visibleBottom) window.scrollBy(0, rect.bottom - visibleBottom + 12);
+    }
+  }
+  function endNumberEditing() {
+    numberEditing = null;
+    document.body.classList.remove('number-editing');
+    $('#numberInputBar').hidden = true;
+    $('#drumSheet').classList.remove('number-direct');
+    $('#repsSheet').classList.remove('number-direct');
+  }
+  function beginNumberEditing(input) {
+    numberEditing = input;
+    document.body.classList.add('number-editing');
+    var sheet = input.closest('#drumSheet, #repsSheet');
+    if (sheet) {
+      sheet.classList.add('number-direct');
+      $('#numberInputBar').hidden = true;
+    } else {
+      $('#numberInputLabel').textContent = input.getAttribute('aria-label') || '数値を入力';
+      $('#numberInputBar').hidden = false;
+    }
+    positionNumberEditing();
+  }
+  function bindNumberEditing() {
+    document.addEventListener('focusin', function (event) {
+      var input = event.target;
+      if (input.matches('.core-entry input[data-field], #drumDirectInput, #repsDirectInput')) beginNumberEditing(input);
+      else if (!input.closest('#numberInputBar, .number-direct')) endNumberEditing();
+    });
+    document.addEventListener('focusout', function () {
+      setTimeout(function () {
+        if (numberEditing && document.activeElement !== numberEditing && !document.activeElement.closest('#numberInputBar, .number-direct')) endNumberEditing();
+      }, 0);
+    });
+    document.addEventListener('input', function (event) {
+      if (event.target.matches('.core-entry input[data-field]')) event.target.value = event.target.value.replace(/[^0-9]/g, '').slice(0, 5);
+    });
+    $('#numberInputDone').addEventListener('pointerdown', function (event) { event.preventDefault(); });
+    $('#numberInputDone').onclick = function () {
+      var input = numberEditing;
+      if (input) { input.dispatchEvent(new Event('change', { bubbles: true })); input.blur(); }
+      endNumberEditing();
+    };
+    ['drumDone', 'drumCancel', 'repsDone', 'repsCancel'].forEach(function (id) {
+      $('#' + id).addEventListener('pointerdown', function (event) { event.preventDefault(); });
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' || event.target !== numberEditing) return;
+      event.preventDefault();
+      if (numberEditing.id === 'drumDirectInput') closeDrum(true);
+      else if (numberEditing.id === 'repsDirectInput') closeRepsDrum(true);
+      else $('#numberInputDone').click();
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', positionNumberEditing);
+      window.visualViewport.addEventListener('scroll', positionNumberEditing);
+    }
+    window.addEventListener('resize', positionNumberEditing);
+  }
+
   /* ================== 重量±ボタンの刻み幅（設定で変更可） ================== */
   var WEIGHT_STEP_OPTIONS = [0.5, 1, 1.25, 2.5, 5];
   var weightStepSettings = { step: 2.5 }; // 既定値は従来どおり2.5kg
@@ -630,10 +700,12 @@
 
   function closeDrum(commit) {
     if (commit && drumTarget) {
-      var v = drumSelIndex >= 0 ? Math.round(drumSelIndex * DRUM_STEP * 100) / 100 : 0;
+      var typed = $('#drumDirectInput').value.trim();
+      var v = typed && isFinite(Number(typed)) && Number(typed) >= 0 ? Math.min(DRUM_MAX, Number(typed)) : (drumSelIndex >= 0 ? Math.round(drumSelIndex * DRUM_STEP * 100) / 100 : 0);
       DB.updateSet(ui.date, drumTarget.entryId, drumTarget.idx, 'w', v);
       checkRecordToast(drumTarget.entryId);
     }
+    endNumberEditing();
     $('#drumBackdrop').classList.remove('show');
     $('#drumSheet').classList.remove('show');
     $('#drumDirectInput').blur();
@@ -746,10 +818,12 @@
 
   function closeRepsDrum(commit) {
     if (commit && repsTarget) {
-      var v = repsSelIndex >= 0 ? repsSelIndex : 0;
+      var typed = $('#repsDirectInput').value.trim();
+      var v = typed && isFinite(Number(typed)) && Number(typed) >= 0 ? Math.min(REPS_MAX, Math.floor(Number(typed))) : (repsSelIndex >= 0 ? repsSelIndex : 0);
       DB.updateSet(ui.date, repsTarget.entryId, repsTarget.idx, 'r', v);
       checkRecordToast(repsTarget.entryId);
     }
+    endNumberEditing();
     $('#repsBackdrop').classList.remove('show');
     $('#repsSheet').classList.remove('show');
     $('#repsDirectInput').blur();
@@ -1183,9 +1257,9 @@
     var cfg = DB.coreConfig(e || {});
     return '<div class="core-options"><label>記録方式<select id="' + prefix + 'Mode">' + Object.keys(CORE_MODES).map(function (m) {
       return '<option value="' + m + '"' + (m === cfg.mode ? ' selected' : '') + '>' + CORE_MODES[m] + '</option>';
-    }).join('') + '</select></label><label>左右の区別<select id="' + prefix + 'Side"><option value="no">なし</option><option value="yes"' + (cfg.side ? ' selected' : '') + '>左右別</option></select></label></div>';
+    }).join('') + '</select></label></div>';
   }
-  function readCoreFields(prefix) { return { coreMode: $('#' + prefix + 'Mode').value, coreSide: $('#' + prefix + 'Side').value === 'yes' }; }
+  function readCoreFields(prefix) { return { coreMode: $('#' + prefix + 'Mode').value, coreSide: false }; }
   function coreRowsText(e) {
     var cfg = DB.coreConfig(e);
     return (e.sets || []).map(function (s) {
@@ -1204,20 +1278,18 @@
   }
   function coreEntryHtml(e, i) {
     var cfg = DB.coreConfig(e);
-    var input = function (s, field, label, unit) {
-      return '<label class="core-input">' + label + '<span><input type="number" inputmode="numeric" min="0" max="86400" step="1" data-field="' + field + '" value="' + esc(s[field] == null ? '' : s[field]) + '" placeholder="—" aria-label="' + label + '"><small>' + unit + '</small></span></label>';
+    var input = function (s, field, n, unit) {
+      return '<label class="core-inline-field"><input type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" maxlength="5" data-field="' + field + '" value="' + esc(s[field] == null ? '' : s[field]) + '" placeholder="—" aria-label="セット' + (n + 1) + (field === 'seconds' ? ' 秒数' : ' 回数') + '"><small>' + unit + '</small></label>';
     };
     var rows = e.sets.map(function (s, n) {
-      var fields = (cfg.side ? ['', 'right'] : ['']).map(function (side) {
-        var prefix = cfg.side ? (side ? '右 ' : '左 ') : '';
-        return '<div class="core-measures">' + (cfg.mode !== 'reps' ? input(s, side ? 'rightSeconds' : 'seconds', prefix + (cfg.mode === 'hold' ? '1回の保持時間' : '実施時間'), '秒') : '') +
-          (cfg.mode !== 'time' ? input(s, side ? 'rightReps' : 'reps', prefix + '回数', '回') : '') + '</div>';
-      }).join('');
-      return '<div class="core-set" data-idx="' + n + '"><div class="core-set-head"><span>セット ' + (n + 1) + '</span><button class="link danger" data-action="del-set" aria-label="セット' + (n + 1) + 'を削除">削除</button></div>' + fields + '</div>';
+      return '<div class="core-inline-row" data-idx="' + n + '"><span class="core-set-number">' + (n + 1) + '</span>' +
+        (cfg.mode !== 'reps' ? input(s, 'seconds', n, '秒') : '') +
+        (cfg.mode === 'hold' ? '<span class="core-multiply">×</span>' : '') +
+        (cfg.mode !== 'time' ? input(s, 'reps', n, '回') : '') +
+        '<button class="core-remove" data-action="del-set" aria-label="セット' + (n + 1) + 'を削除">×</button></div>';
     }).join('');
-    return '<article class="entry core-entry" data-entry="' + e.id + '">' + entryHead(e) +
-      '<p class="core-hint">' + CORE_MODES[cfg.mode] + (cfg.side ? ' ・ 左右で1セット、回数は片側ずつ' : '') + '</p>' + prevLine(e) +
-      '<div class="sets">' + rows + '</div><div class="entry-foot"><button class="btn ghost small" data-action="add-set">＋ セット追加</button>' +
+    return '<article class="entry core-entry" data-entry="' + e.id + '">' + entryHead(e) + prevLine(e) +
+      '<div class="sets core-inline-sets">' + rows + '</div><div class="entry-foot"><button class="btn ghost small" data-action="add-set">＋ セット追加</button>' +
       '<button class="btn ghost small" data-action="duplicate-core">最終セットを複製</button><span class="vol">' + coreTotalText(e) + '</span></div></article>';
   }
 
@@ -4507,6 +4579,7 @@
   bindSettings();
   bindAppReview();
   bindExInfo();
+  bindNumberEditing();
   bindDrum();
   bindCtime();
   bindGen();
@@ -4524,6 +4597,8 @@
   if (isNativeApp() && window.Capacitor.getPlatform() === 'ios') {
     var keyboard = nativePlugin('Keyboard');
     if (keyboard) {
+      keyboard.addListener('keyboardWillShow', function (info) { nativeNumberKeyboardHeight = info.keyboardHeight || 0; positionNumberEditing(); });
+      keyboard.addListener('keyboardWillHide', function () { nativeNumberKeyboardHeight = 0; positionNumberEditing(); });
       keyboard.setAccessoryBarVisible({ isVisible: false }).catch(function (error) {
         console.warn('キーボード補助バーを非表示にできませんでした', error);
       });
