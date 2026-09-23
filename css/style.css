@@ -1996,7 +1996,6 @@ button { cursor: pointer; }
 }
 .tw-item.sel { color: var(--accent); font-size: 30px; }
 
-.timer-note { font-size: 11px; color: var(--dim); line-height: 1.7; margin-top: 14px; }
 
 /* 通知が出せない状態の警告。押すと設定の「音の状態」へ飛ぶ。
    鳴らない原因が画面のどこにも出ないのが一番困るので、タイマー画面の一番上に置く */

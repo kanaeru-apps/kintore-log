@@ -4181,12 +4181,6 @@
     if (!timer.twBound) { loadCustomMin(); bindTimer(); }
     if (!timer.running && !timer.finished) { setTimerView('setup'); scrollTwToCustom(); }
     renderTimer();
-    var note = $('#timerNote');
-    if (note) {
-      note.textContent = isNativeApp()
-        ? '終了時に音・通知・アプリバッジでお知らせします。作動中は画面が消えないようにします（iPhoneはアプリを開いている間に有効）。'
-        : '終了音を優先して鳴らします。その数秒間はYouTubeなどの音が止まる場合があります。YouTubeアプリへ切り替えるとiPhoneがPWAを停止するため、筋トレLogを画面に表示したまま使ってください。';
-    }
     /* タイマー画面を開いた時点で、通知が出せない状態なら先に知らせる。
        「開始して5分待ったが鳴らなかった」より前に気付けるようにする */
     refreshNotifWarning();
