@@ -466,6 +466,77 @@ open class MainViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(AlarmAudioPlugin())
         bridge?.registerPluginInstance(RestAlarmPlugin())
+        bridge?.registerPluginInstance(CSVExportPlugin())
+    }
+}
+
+/// 保存先の選択・書き出しはiOSに任せ、完了通知が来るまで成功扱いにしない。
+@objc(CSVExportPlugin)
+public class CSVExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDelegate {
+    public let identifier = "CSVExportPlugin"
+    public let jsName = "CSVExport"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "save", returnType: CAPPluginReturnPromise)
+    ]
+    private var pendingCall: CAPPluginCall?
+    private var temporaryDirectory: URL?
+
+    @objc public func save(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard self.pendingCall == nil else {
+                call.reject("保存先を選択中です"); return
+            }
+            guard let text = call.getString("text"), let name = call.getString("fileName"),
+                  name.hasSuffix(".csv"), !name.contains("/"), !name.contains("\\"),
+                  !name.contains("\0"), !name.isEmpty else {
+                call.reject("CSVデータまたはファイル名が不正です"); return
+            }
+            guard let presenter = self.bridge?.viewController,
+                  presenter.viewIfLoaded?.window != nil,
+                  presenter.presentedViewController == nil else {
+                call.reject("保存画面を開けません。他の画面を閉じてから再度お試しください"); return
+            }
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("kintore-csv-" + UUID().uuidString, isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                self.temporaryDirectory = directory
+                let file = directory.appendingPathComponent(name)
+                try text.write(to: file, atomically: true, encoding: .utf8)
+                let picker = UIDocumentPickerViewController(forExporting: [file], asCopy: true)
+                picker.delegate = self
+                picker.modalPresentationStyle = .fullScreen
+                self.pendingCall = call
+                presenter.present(picker, animated: true)
+            } catch {
+                self.cleanTemporaryFile()
+                call.reject("CSVの準備に失敗しました", nil, error)
+            }
+        }
+    }
+
+    public func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        guard let call = pendingCall else { return }
+        pendingCall = nil
+        if let saved = urls.first {
+            call.resolve(["saved": true, "fileName": saved.lastPathComponent])
+        } else {
+            call.reject("保存先を確認できませんでした")
+        }
+        cleanTemporaryFile()
+    }
+
+    public func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        let call = pendingCall
+        pendingCall = nil
+        call?.resolve(["saved": false, "cancelled": true])
+        cleanTemporaryFile()
+    }
+
+    private func cleanTemporaryFile() {
+        // この書き出しで作った一時フォルダだけを削除。選択先のCSVには触れない。
+        if let directory = temporaryDirectory { try? FileManager.default.removeItem(at: directory) }
+        temporaryDirectory = nil
     }
 }
 

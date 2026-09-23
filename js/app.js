@@ -3156,7 +3156,9 @@
     });
   }
 
-  function exportCSV() {
+  var csvExportBusy = false;
+  async function exportCSV() {
+    if (csvExportBusy) return;
     var dates = DB.datesWithData();
     var exerciseRows = rowsForExerciseMaster();
     if (!dates.length && !exerciseRows.length) { toast('書き出すデータがありません'); return; }
@@ -3173,14 +3175,36 @@
       rowsForDate(date).forEach(function (row) { lines.push(row.map(csv).join(',')); });
     });
     exerciseRows.forEach(function (row) { lines.push(row.map(csv).join(',')); });
-    var blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv' }); // BOM付きでExcel文字化け防止
+    var text = '\uFEFF' + lines.join('\r\n'); // BOM付きでExcel文字化け防止
+    var fileName = '筋トレLog_' + DB.todayStr() + '.csv';
+    if (isNativeApp()) {
+      csvExportBusy = true;
+      var button = $('#exportCsvBtn');
+      if (button) button.disabled = true;
+      try {
+        var exporter = nativePlugin('CSVExport');
+        if (!exporter) throw new Error('CSV保存機能が読み込まれていません');
+        var result = await exporter.save({ text: text, fileName: fileName });
+        if (result && result.saved) toast('選択した保存先に「' + (result.fileName || fileName) + '」を保存しました');
+        else if (result && result.cancelled) toast('CSVの保存をキャンセルしました');
+        else throw new Error('保存結果を確認できませんでした');
+      } catch (e) {
+        toast('CSVを保存できませんでした。もう一度お試しください');
+        noteAppError('CSV保存', e);
+      } finally {
+        csvExportBusy = false;
+        if (button) button.disabled = false;
+      }
+      return;
+    }
+    var blob = new Blob([text], { type: 'text/csv' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = '筋トレLog_' + DB.todayStr() + '.csv';
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-    toast('記録と種目マスターをCSVに書き出しました');
+    toast('CSVのダウンロードを開始しました。ブラウザの保存先をご確認ください');
   }
 
   /* ================== CSVインポート ================== */
