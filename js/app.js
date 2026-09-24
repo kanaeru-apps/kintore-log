@@ -476,7 +476,7 @@
     var v = window.visualViewport;
     var bottom = Math.max(nativeNumberKeyboardHeight, v ? window.innerHeight - v.height - v.offsetTop : 0, 0);
     document.documentElement.style.setProperty('--number-keyboard-bottom', bottom + 'px');
-    if (numberEditing.closest('.core-entry')) {
+    if (numberEditing.closest('#entries')) {
       var rect = numberEditing.getBoundingClientRect();
       var visibleBottom = window.innerHeight - bottom - 64;
       if (rect.bottom > visibleBottom) window.scrollBy(0, rect.bottom - visibleBottom + 12);
@@ -505,7 +505,7 @@
   function bindNumberEditing() {
     document.addEventListener('focusin', function (event) {
       var input = event.target;
-      if (input.matches('.core-entry input[data-field], #drumDirectInput, #repsDirectInput')) beginNumberEditing(input);
+      if (input.matches('#entries input[data-field], #drumDirectInput, #repsDirectInput')) beginNumberEditing(input);
       else if (!input.closest('#numberInputBar, .number-direct')) endNumberEditing();
     });
     document.addEventListener('focusout', function () {
@@ -1419,7 +1419,7 @@
       return '<label class="cf">' +
         '<span class="cf-label">' + f.label + '</span>' +
         '<span class="cf-inputwrap">' +
-          '<input type="text" inputmode="' + mode + '"' + patternAttr + ' data-field="' + f.k + '" value="' + esc(s[f.k]) + '" placeholder="0">' +
+          '<input type="text" inputmode="' + mode + '"' + patternAttr + ' enterkeyhint="done" aria-label="' + f.label + '（' + f.unit + '）" data-field="' + f.k + '" value="' + esc(s[f.k]) + '" placeholder="0">' +
           '<button type="button" class="cf-clear' + (filled ? ' on' : '') + '" data-action="cf-clear" tabindex="-1" aria-label="' + f.label + 'を消す">✕</button>' +
           '<span class="cf-unit">' + f.unit + '</span>' +
         '</span>' +
