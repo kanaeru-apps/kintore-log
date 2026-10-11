@@ -3615,6 +3615,11 @@
 
     var weightInput = $('#calcWeightVal');
     var weightBeforeEdit = calc.w;
+    $('#calcWeightEdit').onclick = function () {
+      // iOSでも数字キーボードが開くよう、タップの処理内で直接フォーカスする。
+      weightInput.focus();
+      weightInput.select();
+    };
     weightInput.addEventListener('focus', function () {
       weightBeforeEdit = calc.w;
       weightInput.select();

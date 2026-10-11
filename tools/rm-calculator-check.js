@@ -43,7 +43,9 @@ function enter(raw, expected) {
   assert.equal(element('numberInputBar').hidden,true);
 }
 assert.equal(input.value,'60.0');
-input.focus();assert.equal(input.selected,true);
+element('calcWeightEdit').onclick();
+assert.equal(document.activeElement,input);
+assert.equal(input.selected,true);
 assert.equal(element('numberInputLabel').textContent,'重量（kg、0から300）');
 assert.equal(element('numberInputBar').hidden,false);
 enter('90.5',90.5);enter('０９０．５',90.5);enter('',90.5);enter('abc',90.5);
