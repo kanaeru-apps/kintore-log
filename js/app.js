@@ -505,7 +505,7 @@
   function bindNumberEditing() {
     document.addEventListener('focusin', function (event) {
       var input = event.target;
-      if (input.matches('#entries input[data-field], #drumDirectInput, #repsDirectInput')) beginNumberEditing(input);
+      if (input.matches('#entries input[data-field], #drumDirectInput, #repsDirectInput, #calcWeightVal')) beginNumberEditing(input);
       else if (!input.closest('#numberInputBar, .number-direct')) endNumberEditing();
     });
     document.addEventListener('focusout', function () {
@@ -3613,6 +3613,34 @@
     if (calc.inited) { renderCalcResult(); return; }
     calc.inited = true;
 
+    var weightInput = $('#calcWeightVal');
+    var weightBeforeEdit = calc.w;
+    weightInput.addEventListener('focus', function () {
+      weightBeforeEdit = calc.w;
+      weightInput.select();
+    });
+    weightInput.addEventListener('blur', function () {
+      // 空欄・不正な貼り付けは元の値を保持。ダイヤルと同じ範囲・刻みに揃える。
+      var raw = weightInput.value.trim().replace(/[０-９]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0xFEE0);
+      }).replace(/．/g, '.');
+      if (/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw)) {
+        var value = Number(raw);
+        if (Number.isFinite(value)) calc.w = Math.round(Math.min(DIAL_MAX, value) * 10) / 10;
+      }
+      weightInput.value = calc.w.toFixed(1);
+      $('#dialScroll').scrollLeft = Math.round(calc.w * 10 * DIAL_PX);
+      renderCalcResult();
+    });
+    weightInput.addEventListener('keydown', function (e) {
+      if (e.isComposing) return;
+      if (e.key === 'Escape') weightInput.value = weightBeforeEdit.toFixed(1);
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        e.preventDefault();
+        weightInput.blur();
+      }
+    });
+
     // ダイヤルの目盛りトラックを生成（1kgごとに数字ラベル）
     var track = $('#dialTrack');
     track.style.width = (DIAL_MAX * 10 * DIAL_PX) + 'px';
@@ -3630,6 +3658,7 @@
       ticking = true;
       requestAnimationFrame(function () {
         ticking = false;
+        if (document.activeElement === weightInput) return;
         var v = Math.round(scroll.scrollLeft / DIAL_PX) / 10;
         v = Math.max(0, Math.min(DIAL_MAX, v));
         if (v !== calc.w) { calc.w = v; renderCalcResult(); }
@@ -3672,7 +3701,7 @@
   }
 
   function renderCalcResult() {
-    $('#calcWeightVal').innerHTML = calc.w.toFixed(1) + '<small> kg</small>';
+    if (document.activeElement !== $('#calcWeightVal')) $('#calcWeightVal').value = calc.w.toFixed(1);
     $('#calcRepsVal').textContent = calc.r;
     var rm = calc.w * rmCoef(calc.r);
     var rows = '';

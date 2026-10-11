@@ -22,7 +22,7 @@
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
 <script src="js/theme-init.js?v=0.14.1"></script>
-<link rel="stylesheet" href="css/style.css?v=0.14.1-b4">
+<link rel="stylesheet" href="css/style.css?v=0.14.1-b4-rm-input">
 </head>
 <body>
 <div id="app">
@@ -153,8 +153,8 @@
 
       <div class="calc-card">
         <div class="calc-weight-row">
-          <span class="calc-label">WEIGHT</span>
-          <span class="calc-weight num" id="calcWeightVal">60.0<small> kg</small></span>
+          <label class="calc-label" for="calcWeightVal">WEIGHT</label>
+          <span class="calc-weight num"><input id="calcWeightVal" class="num" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" maxlength="12" aria-label="重量（kg、0から300）" value="60.0"><small> kg</small></span>
         </div>
         <div class="dial">
           <div class="dial-pointer"></div>
@@ -541,7 +541,7 @@
 
 <div id="numberInputBar" hidden><span id="numberInputLabel"></span><button id="numberInputDone" type="button">完了</button></div>
 <script src="js/db.js?v=0.14.1"></script>
-<script src="js/app.js?v=0.14.1-b4"></script>
+<script src="js/app.js?v=0.14.1-b4-rm-input"></script>
 <script src="js/charts.js?v=0.14.1"></script>
 <script src="js/register-sw.js?v=0.14.1"></script>
 </body>

@@ -1435,7 +1435,22 @@ button { cursor: pointer; }
   color: var(--dim);
   min-width: 58px;
 }
-.calc-weight { font-size: 40px; line-height: 1.1; color: var(--text); }
+.calc-weight { font-size: 40px; line-height: 1.1; color: var(--text); display: inline-flex; align-items: baseline; gap: 4px; }
+.calc-weight input {
+  width: 5ch;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  text-align: right;
+  box-shadow: none;
+  -webkit-appearance: none;
+}
+.calc-weight input:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
 .calc-weight small { font-size: 14px; color: var(--dim); font-family: var(--font-body); }
 
 /* ダイヤル（左右ドラッグで重量を増減） */
