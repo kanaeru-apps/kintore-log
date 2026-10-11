@@ -22,7 +22,7 @@
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
 <script src="js/theme-init.js?v=0.14.1"></script>
-<link rel="stylesheet" href="css/style.css?v=0.14.1-b4-rm-button">
+<link rel="stylesheet" href="css/style.css?v=0.14.1-b4-rm-arrows">
 </head>
 <body>
 <div id="app">
@@ -158,6 +158,8 @@
         </div>
         <div class="dial">
           <div class="dial-pointer"></div>
+          <span class="dial-arrow dial-arrow-left" aria-hidden="true">◀</span>
+          <span class="dial-arrow dial-arrow-right" aria-hidden="true">▶</span>
           <div class="dial-scroll" id="dialScroll"><div class="dial-track" id="dialTrack"></div></div>
         </div>
         <div class="calc-reps-row">

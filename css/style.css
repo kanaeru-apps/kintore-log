@@ -1475,6 +1475,20 @@ button { cursor: pointer; }
 
 /* ダイヤル（左右ドラッグで重量を増減） */
 .dial { position: relative; margin: 8px 0 16px; }
+.dial-arrow {
+  position: absolute;
+  top: 24px;
+  transform: translateY(-50%);
+  z-index: 3;
+  color: var(--dim);
+  font-family: var(--font-body);
+  font-size: 8px;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
+.dial-arrow-left { left: 0; }
+.dial-arrow-right { right: 0; }
 .dial-pointer {
   position: absolute;
   top: 2px;
