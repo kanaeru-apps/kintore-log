@@ -38,7 +38,11 @@ var Charts = (function () {
       var matched = (w.entries || []).filter(function (e) { return e.exId === exId; });
       if (!matched.length) return;
       var cardio = matched[0].part === '有酸素';
-      if (cardio) {
+      if (matched[0].part === '体幹') {
+        var core = { date: date, core: true, seconds: 0, reps: 0, sets: 0, longest: 0 };
+        matched.forEach(function (e) { var t = DB.coreTotals(e); core.seconds += t.seconds; core.reps += t.reps; core.sets += t.sets; core.longest = Math.max(core.longest, t.longest); });
+        rows.push(core);
+      } else if (cardio) {
         var t = 0, d = 0;
         matched.forEach(function (e) {
           // インターバルは30秒・90秒がすべて秒(ts)側に入るため、分(t)だけを足すと0分になってしまう
@@ -60,7 +64,7 @@ var Charts = (function () {
         rows.push({ date: date, cardio: false, vol: vol, rm: best1rm });
       }
     });
-    return rows.filter(function (r) { return r.cardio ? (r.t > 0 || r.d > 0) : (r.vol > 0 || r.rm > 0); });
+    return rows.filter(function (r) { return r.core ? r.sets > 0 : r.cardio ? (r.t > 0 || r.d > 0) : (r.vol > 0 || r.rm > 0); });
   }
 
   /* ================== 部位別ボリューム：期間バケット ================== */
@@ -116,7 +120,7 @@ var Charts = (function () {
       if (idx < 0) return;
       var w = DB.getWorkout(date);
       (w.entries || []).forEach(function (e) {
-        if (e.part === '有酸素') return;
+        if (e.part === '有酸素' || e.part === '体幹') return;
         var vol = 0;
         e.sets.forEach(function (s) { vol += (+s.w || 0) * (+s.r || 0); });
         if (vol <= 0) return;
@@ -127,7 +131,7 @@ var Charts = (function () {
     // 表示する部位は、期間内に1回でも記録がある部位のみ（凡例が煩雑にならないように）
     var partsUsed = {};
     sums.forEach(function (s) { Object.keys(s).forEach(function (p) { partsUsed[p] = true; }); });
-    var partOrder = DB.PARTS.filter(function (p) { return p !== '有酸素' && partsUsed[p]; });
+    var partOrder = DB.PARTS.filter(function (p) { return p !== '有酸素' && p !== '体幹' && partsUsed[p]; });
 
     var maxTotal = 0;
     var bucketData = buckets.map(function (b, i) {
@@ -271,7 +275,15 @@ var Charts = (function () {
     var labelOf = function (r) { var d = parseDate(r.date); return (d.getMonth() + 1) + '/' + d.getDate(); };
 
     var html = '';
-    if (recent[0].cardio) {
+    if (recent[0].core) {
+      html += chartCard('実施日数', '<p class="core-hint">' + rows.length + '日</p>');
+      if (recent.some(function (r) { return r.seconds; })) {
+        html += chartCard('合計実施・保持時間（秒）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: r.seconds }; })));
+        html += chartCard('最長保持時間（秒）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: r.longest }; })));
+      }
+      if (recent.some(function (r) { return r.reps; })) html += chartCard('合計回数（左右別は左右の合計）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: r.reps }; })));
+      html += chartCard('セット数（左右で1セット）', barChartSvg(recent.map(function (r) { return { label: labelOf(r), value: r.sets }; })));
+    } else if (recent[0].cardio) {
       html += chartCard('時間の推移（分）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: r.t }; })));
       html += chartCard('距離の推移（km）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: r.d }; })));
     } else {

@@ -21,8 +21,8 @@
 <!-- テーマの初期設定。CSSより先に <html data-theme> を決めておかないと、起動の一瞬だけ
      ダークが見えてからライトに変わる（FOUC）。保存キーと既定値は app.js の THEME_KEY と
      揃えること（片方だけ変えるとちらつきが戻る） -->
-<script src="js/theme-init.js?v=0.13.18"></script>
-<link rel="stylesheet" href="css/style.css?v=0.13.18">
+<script src="js/theme-init.js?v=0.14.1"></script>
+<link rel="stylesheet" href="css/style.css?v=0.14.1-b4-rm-arrows">
 </head>
 <body>
 <div id="app">
@@ -125,7 +125,6 @@
           <button class="btn primary" id="twStart">START</button>
         </div>
 
-        <p class="timer-note" id="timerNote">終了時に音・通知・アプリバッジでお知らせします。作動中は画面が消えないようにします（iPhoneはアプリを開いている間に有効）。</p>
       </div>
 
       <!-- 実行中／終了 -->
@@ -154,11 +153,13 @@
 
       <div class="calc-card">
         <div class="calc-weight-row">
-          <span class="calc-label">WEIGHT</span>
-          <span class="calc-weight num" id="calcWeightVal">60.0<small> kg</small></span>
+          <label class="calc-label" for="calcWeightVal">WEIGHT</label>
+          <span class="calc-weight num"><input id="calcWeightVal" class="num" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" maxlength="12" aria-label="重量（kg、0から300）" value="60.0"><small> kg</small><button id="calcWeightEdit" class="calc-weight-edit" type="button" aria-label="重量を入力" aria-controls="calcWeightVal">入力</button></span>
         </div>
         <div class="dial">
           <div class="dial-pointer"></div>
+          <span class="dial-arrow dial-arrow-left" aria-hidden="true">◀</span>
+          <span class="dial-arrow dial-arrow-right" aria-hidden="true">▶</span>
           <div class="dial-scroll" id="dialScroll"><div class="dial-track" id="dialTrack"></div></div>
         </div>
         <div class="calc-reps-row">
@@ -197,6 +198,7 @@
             <button id="addExBtn" class="btn primary small">追加</button>
           </div>
         </div>
+        <div id="newCoreFields" hidden></div>
         <div id="exList"></div>
       </div>
 
@@ -230,6 +232,10 @@
           <div class="s-row">
             <div class="s-main"><b>CSVインポート</b><small>記録と種目マスターをCSVから復元（対象の日は置き換わります）</small></div>
             <button class="link" id="importCsvBtn">読み込む</button>
+          </div>
+          <div class="s-row">
+            <div class="s-main"><b>体幹追加前のデータ</b><small>初回起動前の状態をJSONで保存。通常のCSVとは別に保管します。</small></div>
+            <button class="link" id="exportPreCoreBtn">保存</button>
           </div>
           <div class="s-row" id="restoreBackupRow" style="display:none">
             <div class="s-main"><b>インポート前の状態に戻す</b><small>直前のCSV取り込みを取り消します</small></div>
@@ -282,7 +288,7 @@
         </div>
       </div>
 
-      <p class="version">筋トレLog v0.13.18 — Phase 8</p>
+      <p class="version">筋トレLog v0.14.1 — 体幹追加版</p>
     </section>
 
     <!-- ============ 設定：タイマー ============ -->
@@ -320,31 +326,6 @@
         </div>
       </div>
 
-      <!-- 「鳴らない」ときにどこで止まっているかを見るための表示。
-           ネイティブ版でのみ出す（ブラウザ版は該当する仕組みが無いため） -->
-      <div class="s-section" id="soundDiagSection" hidden>
-        <h4 class="s-title">音の状態</h4>
-        <div class="panel-list">
-          <div class="s-row"><div class="s-main"><b>アラーム音の再生</b><small id="diagPlay">—</small></div></div>
-          <div class="s-row"><div class="s-main"><b>通知音の準備</b><small id="diagNotif">—</small></div></div>
-          <div class="s-row"><div class="s-main"><b>音の扱い（実測）</b><small id="diagSession">—</small></div></div>
-          <div class="s-row"><div class="s-main"><b>通知の許可</b><small id="diagPerm">—</small></div></div>
-          <div class="s-row"><div class="s-main"><b>iPhone側の通知設定</b><small id="diagIos">—</small></div></div>
-          <div class="s-row"><div class="s-main"><b>アプリを開いている時の通知</b><small id="diagForeground">—</small></div></div>
-          <div class="s-row"><div class="s-main"><b>通知の予約</b><small id="diagSched">—</small></div></div>
-          <div class="s-row"><div class="s-main"><b>OSに入っている予約</b><small id="diagPending">—</small></div></div>
-          <div class="s-row"><div class="s-main"><b>配信された通知</b><small id="diagDelivered">—</small></div></div>
-          <div class="s-row"><div class="s-main"><b>通知音の実ファイル</b><small id="diagFiles">—</small></div></div>
-          <div class="s-row"><div class="s-main"><b>アプリ内エラー</b><small id="diagErr">—</small></div></div>
-        </div>
-        <p class="s-note">音が鳴らないときは、この画面のアラーム音を1つタップして試聴してみてください。ここで鳴るのに終了時に鳴らない場合と、ここでも鳴らない場合とで原因が違います。</p>
-        <div class="panel-list">
-          <div class="s-row">
-            <div class="s-main"><b>通知テスト</b><small id="testNotifResult">10秒後に通知を出します。押したらホーム画面に戻って待ってください</small></div>
-            <button id="testNotifBtn" class="btn ghost small" type="button">試す</button>
-          </div>
-        </div>
-      </div>
     </section>
 
   </main>
@@ -389,6 +370,7 @@
     </div>
     <div id="sheetList" class="sheet-list"></div>
     <div class="new-ex">
+      <div id="sheetCoreFields" hidden></div>
       <input id="sheetNewName" type="text" placeholder="リストにない種目名を入力…">
       <div class="new-ex-row">
         <select id="sheetNewEquip" aria-label="器具"></select>
@@ -436,16 +418,15 @@
       <span id="drumTitle" class="drum-title"></span>
       <button id="drumDone" class="drum-done">完了</button>
     </div>
-    <div class="drum-hint"><span>▲ 軽く</span><span>重く ▼</span></div>
     <div class="drum-wrap">
       <div class="drum-highlight"></div>
-      <span class="drum-unit">kg</span>
+      <span class="drum-unit">kg<span class="drum-arrows" aria-hidden="true"><span>▲</span><span>▼</span></span></span>
       <div class="drum-scroll" id="drumScroll"><div class="drum-list" id="drumList"></div></div>
     </div>
     <div class="drum-direct">
       <label for="drumDirectInput">数字で直接入力</label>
       <div class="drum-direct-row">
-        <input type="text" id="drumDirectInput" inputmode="decimal" placeholder="例: 62.5">
+        <input type="text" id="drumDirectInput" enterkeyhint="done" inputmode="decimal" placeholder="—">
         <span class="drum-direct-unit">kg</span>
       </div>
     </div>
@@ -459,16 +440,15 @@
       <span id="repsTitle" class="drum-title"></span>
       <button id="repsDone" class="drum-done">完了</button>
     </div>
-    <div class="drum-hint"><span>▲ 少ない</span><span>多い ▼</span></div>
     <div class="drum-wrap">
       <div class="drum-highlight"></div>
-      <span class="drum-unit">回</span>
+      <span class="drum-unit">回<span class="drum-arrows" aria-hidden="true"><span>▲</span><span>▼</span></span></span>
       <div class="drum-scroll" id="repsScroll"><div class="drum-list" id="repsList"></div></div>
     </div>
     <div class="drum-direct">
       <label for="repsDirectInput">数字で直接入力</label>
       <div class="drum-direct-row">
-        <input type="text" id="repsDirectInput" inputmode="numeric" pattern="[0-9]*" placeholder="例: 10">
+        <input type="text" id="repsDirectInput" enterkeyhint="done" inputmode="numeric" pattern="[0-9]*" placeholder="—">
         <span class="drum-direct-unit">回</span>
       </div>
     </div>
@@ -561,9 +541,10 @@
   <audio id="timerAlarmAudio" playsinline preload="auto"></audio>
 </div>
 
-<script src="js/db.js?v=0.13.18"></script>
-<script src="js/app.js?v=0.13.18"></script>
-<script src="js/charts.js?v=0.13.18"></script>
-<script src="js/register-sw.js?v=0.13.18"></script>
+<div id="numberInputBar" hidden><span id="numberInputLabel"></span><button id="numberInputDone" type="button">完了</button></div>
+<script src="js/db.js?v=0.14.1"></script>
+<script src="js/app.js?v=0.14.1-b4-rm-button"></script>
+<script src="js/charts.js?v=0.14.1"></script>
+<script src="js/register-sw.js?v=0.14.1"></script>
 </body>
 </html>

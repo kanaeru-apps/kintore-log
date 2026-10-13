@@ -6,6 +6,9 @@
     "contentInset": "never"
   },
   "plugins": {
+    "Keyboard": {
+      "resize": "none"
+    },
     "LocalNotifications": {
       "presentationOptions": ["banner", "list", "badge"]
     }
