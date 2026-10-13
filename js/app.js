@@ -120,7 +120,7 @@
   setAudioSessionType(AUDIO_SESSION_IDLE);
 
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
-  var PART_CLASS = { '胸': 'chest', '背中': 'back', '脚': 'leg', '肩': 'shoulder', '腕': 'arm', '腹': 'core', '有酸素': 'cardio', 'その他': 'etc' };
+  var PART_CLASS = { '胸': 'chest', '背中': 'back', '脚': 'leg', '肩': 'shoulder', '腕': 'arm', '腹': 'core', '体幹': 'trunk', '有酸素': 'cardio', 'その他': 'etc' };
   var CARDIO_PART = '有酸素';
   /* 有酸素カードで表示する記録項目（時間は時/分/秒ホイールの専用ボタンで別扱い） */
   var CARDIO_FIELDS = [
@@ -152,6 +152,7 @@
   function hasZone(e) {
     return isCardio(e) && e.sets.some(function (s) { return zoneOf(s); });
   }
+  function isCore(e) { return e && e.part === '体幹'; }
   function isCardio(e) { return e && e.part === CARDIO_PART; }
   /* 時間(分)+秒 を「1時間05分30秒」のように整形。未入力ならnull */
   function fmtCardioTime(s) {
@@ -198,10 +199,11 @@
     return sets.reduce(function (a, s) { return a + ((+s.w || 0) * (+s.r || 0)); }, 0);
   }
   function workoutVol(w) {
-    return (w.entries || []).reduce(function (a, e) { return a + setVol(e.sets); }, 0);
+    return (w.entries || []).reduce(function (a, e) { return a + (isCore(e) || isCardio(e) ? 0 : setVol(e.sets)); }, 0);
   }
   /* 何か1項目でも入力されたセットだけを「実施セット」として数える（有酸素は7項目のいずれか） */
   function filledSets(e) {
+    if (isCore(e)) return e.sets.filter(function (s) { return DB.coreSetStats(e, s).complete > 0; });
     if (isCardio(e)) {
       return e.sets.filter(function (s) {
         return CARDIO_KEYS_ALL.some(function (k) { return (+s[k] || 0) > 0; });
@@ -213,12 +215,16 @@
     return (w.entries || []).reduce(function (a, e) { return a + filledSets(e).length; }, 0);
   }
   function dayStats(w) {
-    var st = { ex: 0, sets: 0, reps: 0, vol: 0, time: 0, dist: 0, hasStr: false, hasCardio: false };
+    var st = { ex: 0, sets: 0, reps: 0, vol: 0, time: 0, dist: 0, hasStr: false, hasCardio: false, hasCore: false, coreSeconds: 0, coreReps: 0 };
     ((w && w.entries) || []).forEach(function (e) {
       var f = filledSets(e);
       if (f.length) st.ex++;
       st.sets += f.length;
-      if (isCardio(e)) {
+      if (isCore(e)) {
+        var ct = DB.coreTotals(e);
+        st.hasCore = true;
+        st.coreSeconds += ct.seconds; st.coreReps += ct.reps;
+      } else if (isCardio(e)) {
         if (f.length) st.hasCardio = true;
         f.forEach(function (s) {
           // 分(t)だけを足すとインターバルの30秒・90秒がすべて0分になってしまうため秒(ts)も含める
@@ -266,6 +272,7 @@
 
   /* ---------- 人体図SVG（自作・部位ハイライト） ---------- */
   function bodySvg(part) {
+    if (part === '体幹') part = '腹';
     var hl = {
       '胸': 'seg-chest', '背中': 'seg-back', '肩': 'seg-shoulder',
       '腕': 'seg-arm', '腹': 'seg-core', '脚': 'seg-leg'
@@ -362,12 +369,60 @@
     } else {
       html += '<p class="video-note">（種目リストから削除された種目のため、URL登録はできません）</p>';
     }
+    if (master && isCore(master)) html += coreFields('infoCore', master) + '<p class="core-hint">変更は次に追加する記録から適用されます。過去・入力中の記録はそのまま残ります。</p>';
     $('#exModalBody').innerHTML = html;
     $('#exModalBackdrop').classList.add('show');
+    $('#exModal').scrollTop = 0;
     $('#exModal').classList.add('show');
   }
 
+  /* iOSではキーボードが開いても固定要素の基準の高さは変わらないため、
+     visualViewportの可視領域に収め、モーダルの中だけをスクロールする。 */
+  var exInfoViewportFrame = 0;
+  var exInfoFocusTimer = 0;
+  function resetExInfoViewport() {
+    var modal = $('#exModal');
+    modal.classList.remove('editing');
+    modal.style.removeProperty('--ex-info-top');
+    modal.style.removeProperty('--ex-info-height');
+  }
+  function updateExInfoViewport() {
+    exInfoViewportFrame = 0;
+    var modal = $('#exModal');
+    var input = document.activeElement;
+    if (!modal.classList.contains('show') || !input ||
+        !modal.contains(input) || !input.matches('input, textarea')) {
+      resetExInfoViewport();
+      return;
+    }
+    var viewport = window.visualViewport;
+    var top = viewport ? viewport.offsetTop : 0;
+    var height = viewport ? viewport.height : window.innerHeight;
+    modal.style.setProperty('--ex-info-top', (top + height / 2) + 'px');
+    modal.style.setProperty('--ex-info-height', Math.max(0, height - 32) + 'px');
+    modal.classList.add('editing');
+
+    var bounds = modal.getBoundingClientRect();
+    var field = input.getBoundingClientRect();
+    var visibleTop = Math.max(bounds.top, top) + 16;
+    var visibleBottom = Math.min(bounds.bottom, top + height) - 16;
+    if (field.top < visibleTop || field.bottom > visibleBottom) {
+      // 中央付近に置き、直前のラベルも読みやすくする。背面の記録画面は動かさない。
+      modal.scrollTop += field.top - (visibleTop + Math.max(0,
+        (visibleBottom - visibleTop - field.height) / 2));
+    }
+  }
+  function scheduleExInfoViewport() {
+    if (!exInfoViewportFrame) {
+      exInfoViewportFrame = window.requestAnimationFrame(updateExInfoViewport);
+    }
+  }
+
   function closeExInfo() {
+    var active = document.activeElement;
+    if (active && $('#exModal').contains(active)) active.blur();
+    window.clearTimeout(exInfoFocusTimer);
+    resetExInfoViewport();
     $('#exModalBackdrop').classList.remove('show');
     $('#exModal').classList.remove('show');
   }
@@ -375,12 +430,27 @@
   function bindExInfo() {
     $('#exModalClose').onclick = closeExInfo;
     $('#exModalBackdrop').onclick = closeExInfo;
+    $('#exModalBody').addEventListener('focusin', function () {
+      scheduleExInfoViewport();
+      // キーボードのアニメーション後にも確認する（resize通知が遅れる端末向け）。
+      window.clearTimeout(exInfoFocusTimer);
+      exInfoFocusTimer = window.setTimeout(scheduleExInfoViewport, 350);
+    });
+    $('#exModalBody').addEventListener('focusout', scheduleExInfoViewport);
+    window.addEventListener('resize', scheduleExInfoViewport);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', scheduleExInfoViewport);
+      window.visualViewport.addEventListener('scroll', scheduleExInfoViewport);
+    }
     // 入力したら即保存
     $('#exModalBody').addEventListener('change', function (e) {
       if (!infoExId) return;
       var ex = DB.getExercise(infoExId);
       if (!ex) return;
-      if (e.target.id === 'exVideoInput') {
+      if (e.target.id === 'infoCoreMode' || e.target.id === 'infoCoreSide') {
+        DB.updateExercise(infoExId, readCoreFields('infoCore'));
+        toast('次に追加する記録から適用します');
+      } else if (e.target.id === 'exVideoInput') {
         var v = e.target.value.trim();
         var safe = safeHttpsUrl(v);
         if (v && !safe) {
@@ -397,6 +467,76 @@
         toast('メモを保存しました');
       }
     });
+  }
+
+  var numberEditing = null;
+  var nativeNumberKeyboardHeight = 0;
+  function positionNumberEditing() {
+    if (!numberEditing) return;
+    var v = window.visualViewport;
+    var bottom = Math.max(nativeNumberKeyboardHeight, v ? window.innerHeight - v.height - v.offsetTop : 0, 0);
+    document.documentElement.style.setProperty('--number-keyboard-bottom', bottom + 'px');
+    if (numberEditing.closest('#entries')) {
+      var rect = numberEditing.getBoundingClientRect();
+      var visibleBottom = window.innerHeight - bottom - 64;
+      if (rect.bottom > visibleBottom) window.scrollBy(0, rect.bottom - visibleBottom + 12);
+    }
+  }
+  function endNumberEditing() {
+    numberEditing = null;
+    document.body.classList.remove('number-editing');
+    $('#numberInputBar').hidden = true;
+    $('#drumSheet').classList.remove('number-direct');
+    $('#repsSheet').classList.remove('number-direct');
+  }
+  function beginNumberEditing(input) {
+    numberEditing = input;
+    document.body.classList.add('number-editing');
+    var sheet = input.closest('#drumSheet, #repsSheet');
+    if (sheet) {
+      sheet.classList.add('number-direct');
+      $('#numberInputBar').hidden = true;
+    } else {
+      $('#numberInputLabel').textContent = input.getAttribute('aria-label') || '数値を入力';
+      $('#numberInputBar').hidden = false;
+    }
+    positionNumberEditing();
+  }
+  function bindNumberEditing() {
+    document.addEventListener('focusin', function (event) {
+      var input = event.target;
+      if (input.matches('#entries input[data-field], #drumDirectInput, #repsDirectInput, #calcWeightVal')) beginNumberEditing(input);
+      else if (!input.closest('#numberInputBar, .number-direct')) endNumberEditing();
+    });
+    document.addEventListener('focusout', function () {
+      setTimeout(function () {
+        if (numberEditing && document.activeElement !== numberEditing && !document.activeElement.closest('#numberInputBar, .number-direct')) endNumberEditing();
+      }, 0);
+    });
+    document.addEventListener('input', function (event) {
+      if (event.target.matches('.core-entry input[data-field]')) event.target.value = event.target.value.replace(/[^0-9]/g, '').slice(0, 5);
+    });
+    $('#numberInputDone').addEventListener('pointerdown', function (event) { event.preventDefault(); });
+    $('#numberInputDone').onclick = function () {
+      var input = numberEditing;
+      if (input) { input.dispatchEvent(new Event('change', { bubbles: true })); input.blur(); }
+      endNumberEditing();
+    };
+    ['drumDone', 'drumCancel', 'repsDone', 'repsCancel'].forEach(function (id) {
+      $('#' + id).addEventListener('pointerdown', function (event) { event.preventDefault(); });
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' || event.target !== numberEditing) return;
+      event.preventDefault();
+      if (numberEditing.id === 'drumDirectInput') closeDrum(true);
+      else if (numberEditing.id === 'repsDirectInput') closeRepsDrum(true);
+      else $('#numberInputDone').click();
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', positionNumberEditing);
+      window.visualViewport.addEventListener('scroll', positionNumberEditing);
+    }
+    window.addEventListener('resize', positionNumberEditing);
   }
 
   /* ================== 重量±ボタンの刻み幅（設定で変更可） ================== */
@@ -560,10 +700,12 @@
 
   function closeDrum(commit) {
     if (commit && drumTarget) {
-      var v = drumSelIndex >= 0 ? Math.round(drumSelIndex * DRUM_STEP * 100) / 100 : 0;
+      var typed = $('#drumDirectInput').value.trim();
+      var v = typed && isFinite(Number(typed)) && Number(typed) >= 0 ? Math.min(DRUM_MAX, Number(typed)) : (drumSelIndex >= 0 ? Math.round(drumSelIndex * DRUM_STEP * 100) / 100 : 0);
       DB.updateSet(ui.date, drumTarget.entryId, drumTarget.idx, 'w', v);
       checkRecordToast(drumTarget.entryId);
     }
+    endNumberEditing();
     $('#drumBackdrop').classList.remove('show');
     $('#drumSheet').classList.remove('show');
     $('#drumDirectInput').blur();
@@ -676,10 +818,12 @@
 
   function closeRepsDrum(commit) {
     if (commit && repsTarget) {
-      var v = repsSelIndex >= 0 ? repsSelIndex : 0;
+      var typed = $('#repsDirectInput').value.trim();
+      var v = typed && isFinite(Number(typed)) && Number(typed) >= 0 ? Math.min(REPS_MAX, Math.floor(Number(typed))) : (repsSelIndex >= 0 ? repsSelIndex : 0);
       DB.updateSet(ui.date, repsTarget.entryId, repsTarget.idx, 'r', v);
       checkRecordToast(repsTarget.entryId);
     }
+    endNumberEditing();
     $('#repsBackdrop').classList.remove('show');
     $('#repsSheet').classList.remove('show');
     $('#repsDirectInput').blur();
@@ -1067,7 +1211,8 @@
     var tiles = statTile('合計種目数', st.ex) + statTile('合計セット数', st.sets);
     if (st.hasStr) tiles += statTile('合計レップ数', st.reps) + statTile('合計負荷量', fmtNum(st.vol), 'kg');
     if (st.hasCardio) tiles += statTile('合計時間', fmtNum(st.time), '分') + statTile('合計距離', fmtNum(st.dist), 'km');
-    if (!st.hasStr && !st.hasCardio) tiles += statTile('合計レップ数', 0) + statTile('合計負荷量', 0, 'kg');
+    if (st.hasCore) tiles += statTile('体幹 合計時間', fmtSeconds(st.coreSeconds)) + statTile('体幹 合計回数', st.coreReps, '回');
+    if (!st.hasStr && !st.hasCardio && !st.hasCore) tiles += statTile('合計レップ数', 0) + statTile('合計負荷量', 0, 'kg');
     $('#dayStats').innerHTML = tiles;
   }
 
@@ -1107,8 +1252,48 @@
     if (keepScrollY !== null) window.scrollTo(0, keepScrollY);
   }
 
+  var CORE_MODES = { time: '時間（秒）', reps: '回数', hold: '保持時間 × 回数' };
+  function coreFields(prefix, e) {
+    var cfg = DB.coreConfig(e || {});
+    return '<div class="core-options"><label>記録方式<select id="' + prefix + 'Mode">' + Object.keys(CORE_MODES).map(function (m) {
+      return '<option value="' + m + '"' + (m === cfg.mode ? ' selected' : '') + '>' + CORE_MODES[m] + '</option>';
+    }).join('') + '</select></label></div>';
+  }
+  function readCoreFields(prefix) { return { coreMode: $('#' + prefix + 'Mode').value, coreSide: false }; }
+  function coreRowsText(e) {
+    var cfg = DB.coreConfig(e);
+    return (e.sets || []).map(function (s) {
+      return (cfg.side ? ['', 'right'] : ['']).map(function (side) {
+        var t = DB.coreValue(s[side ? 'rightSeconds' : 'seconds']);
+        var r = DB.coreValue(s[side ? 'rightReps' : 'reps']);
+        return (cfg.side ? (side ? '右 ' : '左 ') : '') + (cfg.mode === 'time' ? (t || '—') + '秒' : cfg.mode === 'reps' ? (r || '—') + '回' : (t || '—') + '秒 × ' + (r || '—') + '回');
+      }).join(' / ');
+    }).join(' ・ ');
+  }
+  function coreTotalText(e) {
+    var t = DB.coreTotals(e), cfg = DB.coreConfig(e);
+    return t.sets + 'セット' + (t.partial ? '（片側のみ ' + t.partial + '）' : '') +
+      (cfg.mode !== 'reps' ? ' ／ 合計' + (cfg.mode === 'hold' ? '保持 ' : ' ') + fmtSeconds(t.seconds) : '') +
+      (cfg.mode !== 'time' ? ' ／ ' + t.reps + '回' : '') + (t.pending ? ' ／ 保持時間・回数の未入力あり' : '');
+  }
+  function coreEntryHtml(e, i) {
+    var cfg = DB.coreConfig(e);
+    var input = function (s, field, n, unit) {
+      return '<label class="core-inline-field"><input type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" maxlength="5" data-field="' + field + '" value="' + esc(s[field] == null ? '' : s[field]) + '" placeholder="—" aria-label="セット' + (n + 1) + (field === 'seconds' ? ' 秒数' : ' 回数') + '"><small>' + unit + '</small></label>';
+    };
+    var rows = e.sets.map(function (s, n) {
+      return '<div class="core-inline-row" data-idx="' + n + '"><span class="core-set-number">' + (n + 1) + '</span>' +
+        (cfg.mode !== 'reps' ? input(s, 'seconds', n, '秒') : '') +
+        (cfg.mode !== 'time' ? input(s, 'reps', n, '回') : '') +
+        '<button class="set-del" data-action="del-set" aria-label="セット' + (n + 1) + 'を削除">✕</button></div>';
+    }).join('');
+    return '<article class="entry core-entry" data-entry="' + e.id + '">' + entryHead(e) + prevLine(e) +
+      '<div class="sets core-inline-sets">' + rows + '</div><div class="entry-foot"><button class="btn ghost small" data-action="add-set">＋ セット追加</button>' +
+      '<button class="btn ghost small" data-action="duplicate-core">最終セットを複製</button><span class="vol">' + coreTotalText(e) + '</span></div></article>';
+  }
+
   function entryHtml(e, i) {
-    return isCardio(e) ? cardioEntryHtml(e, i) : strengthEntryHtml(e, i);
+    return isCore(e) ? coreEntryHtml(e, i) : isCardio(e) ? cardioEntryHtml(e, i) : strengthEntryHtml(e, i);
   }
 
   /* カード見出し（部位チップ・種目名・削除ボタン）は共通 */
@@ -1124,7 +1309,9 @@
     if (!prev) return '';
     var pd = parseDate(prev.date);
     var body;
-    if (isCardio(e)) {
+    if (isCore(e)) {
+      body = coreRowsText({ sets: prev.sets, coreMode: prev.coreMode, coreSide: prev.coreSide });
+    } else if (isCardio(e)) {
       body = cardioPrevBody(prev.sets);
     } else {
       body = prev.sets.map(function (s) { return esc(s.w || 0) + '×' + esc(s.r || 0); }).join(' / ');
@@ -1232,7 +1419,7 @@
       return '<label class="cf">' +
         '<span class="cf-label">' + f.label + '</span>' +
         '<span class="cf-inputwrap">' +
-          '<input type="text" inputmode="' + mode + '"' + patternAttr + ' data-field="' + f.k + '" value="' + esc(s[f.k]) + '" placeholder="0">' +
+          '<input type="text" inputmode="' + mode + '"' + patternAttr + ' enterkeyhint="done" aria-label="' + f.label + '（' + f.unit + '）" data-field="' + f.k + '" value="' + esc(s[f.k]) + '" placeholder="0">' +
           '<button type="button" class="cf-clear' + (filled ? ' on' : '') + '" data-action="cf-clear" tabindex="-1" aria-label="' + f.label + 'を消す">✕</button>' +
           '<span class="cf-unit">' + f.unit + '</span>' +
         '</span>' +
@@ -1456,6 +1643,9 @@
           DB.removeEntry(ui.date, id);
           renderLog();
         }
+      } else if (a === 'duplicate-core') {
+        DB.addSet(ui.date, id, true);
+        renderLog();
       } else if (a === 'add-set') {
         DB.addSet(ui.date, id);
         renderLog();
@@ -1527,6 +1717,7 @@
       var rowEl = e.target.closest('[data-idx]');
       if (!entryEl || !rowEl) return;
       var v = (input.value === '') ? '' : Math.max(0, parseFloat(input.value) || 0);
+      if (entryEl.classList.contains('core-entry') && v !== '') v = Math.min(86400, Math.floor(v));
       DB.updateSet(ui.date, entryEl.dataset.entry, +rowEl.dataset.idx, input.dataset.field, v);
       checkRecordToast(entryEl.dataset.entry);
       // 「5.30」→「5.3」、「-3」→「0」のように、保存された値を表示にも反映する（従来は再描画が担っていた）
@@ -1542,6 +1733,7 @@
     var w = DB.getWorkout(ui.date);
     renderDayStats(w);
     var e = ((w && w.entries) || []).filter(function (x) { return x.id === entryEl.dataset.entry; })[0];
+    if (isCore(e)) { var coreTotal = entryEl.querySelector('.entry-foot .vol'); if (coreTotal) coreTotal.textContent = coreTotalText(e); return; }
     if (!e || !isCardio(e)) return;
     var t = cardioTotals(e);
 
@@ -1629,6 +1821,8 @@
     $('#sheetEditBar').classList.toggle('show', ui.sheetEdit);
 
     // 新規作成フォームの器具ドロップダウン（初回のみ生成）
+    $('#sheetCoreFields').hidden = ui.pickerPart !== '体幹';
+    if (!$('#sheetCoreMode')) $('#sheetCoreFields').innerHTML = coreFields('sheetCore');
     var eqSel = $('#sheetNewEquip');
     if (!eqSel.options.length) eqSel.innerHTML = equipOptions();
   }
@@ -1741,7 +1935,7 @@
         toast('「' + name + (equip ? '（' + equip + '）' : '') + '」はすでに登録されています');
         return;
       }
-      var ex = DB.addExercise(name, ui.pickerPart, equip);
+      var ex = DB.addExercise(name, ui.pickerPart, equip, ui.pickerPart === '体幹' ? readCoreFields('sheetCore') : null);
       DB.addEntry(ui.date, ex.id);
       $('#sheetNewName').value = '';
       $('#sheetNewEquip').value = '';
@@ -1888,7 +2082,9 @@
             '<span class="h-wd">(' + WD[d.getDay()] + ')</span>' +
             '<span class="h-parts">' + parts.map(partChip).join('') + '</span>' +
           '</div>' +
-          '<div class="h-meta">' + (w.entries || []).length + '種目 · ' + workoutSets(w) + 'セット · VOL <b class="num">' + fmtNum(workoutVol(w)) + '</b> kg</div>' +
+          '<div class="h-meta">' + (w.entries || []).length + '種目 · ' + workoutSets(w) + 'セット' +
+            (dayStats(w).hasStr ? ' · VOL <b class="num">' + fmtNum(workoutVol(w)) + '</b> kg' : '') +
+            (dayStats(w).hasCore ? ' · 体幹 ' + fmtSeconds(dayStats(w).coreSeconds) + ' / ' + dayStats(w).coreReps + '回' : '') + '</div>' +
         '</button>' +
         (open ? hBodyHtml(w) : '') +
       '</div>';
@@ -1900,7 +2096,7 @@
     var rows = (w.entries || []).map(function (e) {
       // 有酸素は記録カードの前回行と同じ要約（cardioPrevBody）を使う。
       // インターバルだと16セッションが並んで読めなくなるうえ、分(t)だけ見ると30秒が0分と出てしまうため
-      var setsHtml = isCardio(e)
+      var setsHtml = isCore(e) ? coreRowsText(e) : isCardio(e)
         ? (cardioPrevBody(e.sets) || '—')
         : esc(e.sets.map(function (s) { return (s.w || 0) + '×' + (s.r || 0); }).join(' / ') || '—');
       return '<div class="h-entry">' + partChip(e.part) + '<b>' + esc(e.name) + '</b>' + equipTag(e.equip) +
@@ -1992,6 +2188,8 @@
         return '<option value="' + esc(p) + '">' + esc(p) + '</option>';
       }).join('');
     }
+    $('#newCoreFields').hidden = sel.value !== '体幹';
+    if (!$('#newCoreMode')) $('#newCoreFields').innerHTML = coreFields('newCore');
     var eqSel = $('#newExEquip');
     if (!eqSel.options.length) eqSel.innerHTML = equipOptions();
 
@@ -2088,13 +2286,18 @@
     if (nativeRestorePending) return Promise.resolve(false);
     var json = DB.exportStateJSON();
     if (!json) return Promise.resolve(false);
-    return fsPlugin.writeFile({
+    var preCore = localStorage.getItem(DB.PRE_CORE_KEY);
+    // A restored installation may have a fresh localStorage snapshot. Keep the existing native rollback file.
+    var preserve = preCore ? fsPlugin.readFile({ path: 'kintore-pre-core-20260923.json', directory: 'DOCUMENTS', encoding: 'utf8' }).catch(function () {
+      return fsPlugin.writeFile({ path: 'kintore-pre-core-20260923.json', data: preCore, directory: 'DOCUMENTS', encoding: 'utf8', recursive: true });
+    }) : Promise.resolve();
+    return preserve.then(function () { return fsPlugin.writeFile({
       path: NATIVE_BACKUP_FILE,
       data: json,
       directory: 'DOCUMENTS',
       encoding: 'utf8',
       recursive: true
-    }).then(function () {
+    }); }).then(function () {
       try { localStorage.setItem(NATIVE_BACKUP_AT_KEY, new Date().toISOString()); } catch (e) { /* noop */ }
       renderStorageInfo();
       return true;
@@ -2452,6 +2655,18 @@
   /* 許可とiOS設定を読み直して警告を出し直す */
   function refreshNotifWarning() {
     if (!isNativeApp()) return Promise.resolve();
+    if (wantsRestAlarm() && restAlarmState.supported) {
+      var sequence = restAlarmState.sequence;
+      var plugin = nativePlugin('RestAlarm');
+      return plugin.status().then(function (state) {
+        restAlarmState.supported = state.supported;
+        if (!wantsRestAlarm() || sequence !== restAlarmState.sequence) return;
+        renderNotifWarning(state.denied ? {
+          title: 'アラームが許可されていません',
+          body: 'タップしてiPhoneの設定でアラームを許可してください。通常の通知では消音中に音が鳴りません'
+        } : restAlarmState.warning);
+      }).catch(function () { /* 予約時のエラー表示を維持する */ });
+    }
     /* ここも許可を聞き直すので、診断欄の「許可」を書く資格を取ってから始める。
        取れなかったときに前の値を書き戻すのは、
        ①元々「取れなければ前の値を残す」仕様だったのを変えないため
@@ -2466,6 +2681,7 @@
       .then(function (r) { return r || null; }, function () { return null; })
       : Promise.resolve(null);
     return Promise.all([permP, iosP]).then(function (v) {
+      if (wantsRestAlarm() && restAlarmState.supported) return;
       writeDiag('perm', permToken, v[0] || soundDiag.perm);
       renderNotifWarning(describeNotifBlock(v[0], v[1]));
     }, function () { /* noop */ });
@@ -2734,7 +2950,81 @@
      先に出しておいて後から出し直しても二重に鳴ることはない。
      予約前に cancel していたのもやめた（cancel の完了を待っていなかったため、
      順序が入れ替わると予約したばかりの通知を自分で消す可能性があった）。 */
+  var restAlarmState = { supported: false, sequence: 0, key: '', endAt: 0, warning: null };
+  function wantsRestAlarm() {
+    return isNativeApp() && timerSettings.notifyOn && timerSettings.soundOn && timerSettings.ignoreSilent;
+  }
+  function initRestAlarm() {
+    if (!isNativeApp()) return;
+    var plugin = nativePlugin('RestAlarm');
+    if (plugin) plugin.status().then(function (state) {
+      restAlarmState.supported = !!state.supported;
+      if (restAlarmState.supported && timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
+    }).catch(function () { /* 旧ビルドは通常の通知を使う */ });
+  }
+  function cancelRestAlarm() {
+    restAlarmState.sequence++;
+    restAlarmState.key = '';
+    restAlarmState.endAt = 0;
+    restAlarmState.warning = null;
+    var plugin = isNativeApp() && nativePlugin('RestAlarm');
+    if (!plugin || !restAlarmState.supported) return Promise.resolve();
+    return plugin.cancel().catch(function (e) {
+      renderNotifWarning({ title: 'アラームの停止を確認できません', body: 'iPhoneに表示されるアラームの停止ボタンも押してください' });
+      noteAppError('アラーム停止', e);
+    });
+  }
   function scheduleTimerNotification(endAtMs) {
+    if (!isNativeApp()) return;
+    if (endAtMs <= Date.now()) { cancelTimerNotification(); return; }
+    var plugin = nativePlugin('RestAlarm');
+    if (!wantsRestAlarm() || !plugin || !restAlarmState.supported) {
+      cancelRestAlarm();
+      scheduleLegacyTimerNotification(endAtMs);
+      return;
+    }
+    var key = endAtMs + ':' + timerSettings.sound;
+    if (restAlarmState.key === key) return; // 背面への切り替えで同じ予約を作り直さない
+    var sequence = ++restAlarmState.sequence;
+    restAlarmState.key = key;
+    restAlarmState.endAt = 0;
+    restAlarmState.warning = null;
+    cancelLegacyTimerNotification();
+    plugin.schedule({ endAt: endAtMs, sound: timerSettings.sound }).then(function (result) {
+      if (sequence !== restAlarmState.sequence) return;
+      if (result.ok) {
+        restAlarmState.endAt = endAtMs;
+        renderNotifWarning(null);
+        // 許可操作中に終了した場合も、アプリ音とOSアラームを重ねない。
+        if (timer.finished) { stopBeep(); stopVibrate(); }
+        return;
+      }
+      if (result.reason === 'superseded') return;
+      if (result.reason === 'expired') {
+        restAlarmState.key = '';
+        if (timer.finished && timer.endAt === endAtMs) { playAlarmSound(); vibrateAlarm(); }
+        return;
+      }
+      restAlarmState.key = '';
+      restAlarmState.warning = {
+        title: '消音中に鳴らすにはアラームの許可が必要です',
+        body: 'タップしてiPhoneの設定で許可してください。今回は通常の通知でお知らせします'
+      };
+      renderNotifWarning(restAlarmState.warning);
+      if (timer.running && !timer.paused && timer.endAt === endAtMs) scheduleLegacyTimerNotification(endAtMs);
+      else if (timer.finished && timer.endAt === endAtMs) { playAlarmSound(); vibrateAlarm(); }
+    }).catch(function (e) {
+      if (sequence !== restAlarmState.sequence) return;
+      restAlarmState.key = '';
+      restAlarmState.warning = { title: 'アラームを予約できませんでした', body: '今回は通常の通知を使います。消音中は音が鳴りません' };
+      renderNotifWarning(restAlarmState.warning);
+      noteAppError('アラーム予約', e);
+      if (timer.running && !timer.paused && timer.endAt === endAtMs) scheduleLegacyTimerNotification(endAtMs);
+      else if (timer.finished && timer.endAt === endAtMs) { playAlarmSound(); vibrateAlarm(); }
+    });
+  }
+  function scheduleLegacyTimerNotification(endAtMs) {
+    var alarmSequence = restAlarmState.sequence;
     if (!isNativeApp()) { writeSched(claimSched(), '—（ブラウザ版）'); return; }
     var ln = nativePlugin('LocalNotifications');
     if (!ln) { writeSched(claimSched(), 'NG: 通知プラグインが読み込まれていない'); return; }
@@ -2748,6 +3038,7 @@
     //    その間はアプリが前面なのでJSは止まらない。取れたら同じidで出し直す
     withTimeout(ensureNotifPermission(), PERM_WAIT_MS, null)
       .then(function (granted) {
+        if (alarmSequence !== restAlarmState.sequence) return;
         /* 許可が無いと分かった時点で、進行中の予約確認より新しい確定情報になる。
            番号を取り直して、あとから返る確認結果に上書きされないようにする。 */
         if (granted === false) { writeSched(claimSched(), 'NG: 通知が許可されていない'); return; }
@@ -2764,33 +3055,12 @@
     ensureNotificationSounds();
   }
 
-  /* 設定画面の「通知テスト」。タイマーを5分回さなくても10秒で試せるようにする。 */
-  function runNotifTest() {
-    var out = $('#testNotifResult');
-    function say(t) { if (out) out.textContent = t; }
-    if (!isNativeApp()) { say('ブラウザ版では試せません（アプリ版のみ）'); return; }
-    var ln = nativePlugin('LocalNotifications');
-    if (!ln) { say('NG: 通知プラグインが読み込まれていません'); return; }
-
-    // タイマー本体と同じく、待たずにまず予約する
-    var atMs = Date.now() + 10000;
-    pushNotif(ln, TEST_NOTIF_ID, 'テスト通知です（10秒後）', atMs);
-    say('予約しました。' + hhmmss(new Date(atMs)) + ' に鳴ります。今すぐホーム画面に戻るか画面を消して待ってください');
-
-    withTimeout(ensureNotifPermission(), PERM_WAIT_MS, null)
-      .then(function (granted) {
-        if (granted === false) {
-          say('NG: 通知が許可されていません。iPhoneの「設定 > 通知 > 筋トレLog」を開いて「通知を許可」をONにしてください');
-        }
-        // 予約一覧は renderSoundDiag が取り直す。ここで先に聞くと同じ問い合わせが二重になる
-      })
-      .then(renderSoundDiag)
-      .catch(function (e) { noteAppError('通知テスト', e); });
-    ensureNotificationSounds();
-  }
-
   /* cancel が消すのは「まだ配信されていない予約」だけ。配信済みの通知には効かない。 */
   function cancelTimerNotification() {
+    cancelRestAlarm();
+    cancelLegacyTimerNotification();
+  }
+  function cancelLegacyTimerNotification() {
     var ln = nativePlugin('LocalNotifications');
     if (!ln) return;
     try {
@@ -2874,7 +3144,30 @@
   }
 
 
+  async function exportPreCoreBackup() {
+    var json = localStorage.getItem(DB.PRE_CORE_KEY);
+    if (!json) { toast('変更前のバックアップはありません'); return; }
+    var fileName = 'kintore-pre-core-20260923.json';
+    if (isNativeApp()) {
+      try {
+        var plugin = nativePlugin('Filesystem');
+        if (!plugin) throw new Error('Filesystem unavailable');
+        try { await plugin.readFile({ path: fileName, directory: 'DOCUMENTS', encoding: 'utf8' }); }
+        catch (missing) { await plugin.writeFile({ path: fileName, data: json, directory: 'DOCUMENTS', encoding: 'utf8', recursive: true }); }
+        toast('端末内のDocumentsに変更前のJSONを保存しました');
+      } catch (e) { toast('変更前のJSONを保存できませんでした'); }
+      return;
+    }
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+    a.download = fileName; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    toast('変更前のJSONのダウンロードを開始しました');
+  }
+
   function bindSettings() {
+    $('#exportPreCoreBtn').onclick = exportPreCoreBackup;
+    $('#newExPart').addEventListener('change', function () { $('#newCoreFields').hidden = this.value !== '体幹'; });
     $('#weightStepList').addEventListener('click', function (e) {
       var row = e.target.closest('[data-wstep]');
       if (!row) return;
@@ -2898,7 +3191,7 @@
         toast('「' + name + (equip ? '（' + equip + '）' : '') + '」はすでに登録されています');
         return;
       }
-      DB.addExercise(name, part, equip);
+      DB.addExercise(name, part, equip, part === '体幹' ? readCoreFields('newCore') : null);
       $('#newExName').value = '';
       $('#newExEquip').value = '';
       // 追加した部位だけを開いた状態にする（他は閉じる）
@@ -2984,7 +3277,7 @@
   var ROW_HEAD = ['日付', '曜日', '部位', '種目', '器具', 'セット',
     '重量kg', '回数', 'ボリュームkg',
     '時間min', '時間秒', '距離km', '速度kmh', '傾斜%', 'カロリーkcal', '心拍bpm', 'メモ', '強度',
-    'データ種別', '参考動画URL', 'フォームメモ'];
+    'データ種別', '参考動画URL', 'フォームメモ', '体幹記録方式', '体幹左右別', '体幹秒', '体幹回数', '体幹右秒', '体幹右回数'];
   var CSV_ROW_WORKOUT = '記録';
   var CSV_ROW_EXERCISE = '種目マスター';
   /* 指定日の記録をROW_HEADと同じ並びの行配列に変換する。記録が無ければ空配列 */
@@ -2996,12 +3289,13 @@
     var rows = [];
     (w.entries || []).forEach(function (e) {
       var cardio = isCardio(e);
+      var core = isCore(e);
       e.sets.forEach(function (s, i) {
         rows.push([
           date, WD[d.getDay()], e.part, e.name, e.equip || '', i + 1,
-          cardio ? '' : val(s.w),
-          cardio ? '' : val(s.r),
-          cardio ? '' : (+s.w || 0) * (+s.r || 0),
+          cardio || core ? '' : val(s.w),
+          cardio || core ? '' : val(s.r),
+          cardio || core ? '' : (+s.w || 0) * (+s.r || 0),
           cardio ? val(s.t) : '',
           cardio ? val(s.ts) : '',
           cardio ? val(s.d) : '',
@@ -3011,7 +3305,9 @@
           cardio ? val(s.hr) : '',
           w.memo || '',
           cardio ? zoneCsv(zoneOf(s)) : '',
-          CSV_ROW_WORKOUT, '', ''
+          CSV_ROW_WORKOUT, '', '',
+          core ? DB.coreConfig(e).mode : '', core ? (DB.coreConfig(e).side ? '左右別' : 'なし') : '',
+          core ? val(s.seconds) : '', core ? val(s.reps) : '', core ? val(s.rightSeconds) : '', core ? val(s.rightReps) : ''
         ]);
       });
     });
@@ -3025,12 +3321,15 @@
       return [
         '', '', ex.part, ex.name, ex.equip || '',
         '', '', '', '', '', '', '', '', '', '', '', '', '',
-        CSV_ROW_EXERCISE, safeHttpsUrl(ex.video), limitedText(ex.note, INPUT_LIMITS.exerciseNote)
+        CSV_ROW_EXERCISE, safeHttpsUrl(ex.video), limitedText(ex.note, INPUT_LIMITS.exerciseNote),
+        isCore(ex) ? DB.coreConfig(ex).mode : '', isCore(ex) ? (DB.coreConfig(ex).side ? '左右別' : 'なし') : '', '', '', '', ''
       ];
     });
   }
 
-  function exportCSV() {
+  var csvExportBusy = false;
+  async function exportCSV() {
+    if (csvExportBusy) return;
     var dates = DB.datesWithData();
     var exerciseRows = rowsForExerciseMaster();
     if (!dates.length && !exerciseRows.length) { toast('書き出すデータがありません'); return; }
@@ -3047,21 +3346,43 @@
       rowsForDate(date).forEach(function (row) { lines.push(row.map(csv).join(',')); });
     });
     exerciseRows.forEach(function (row) { lines.push(row.map(csv).join(',')); });
-    var blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv' }); // BOM付きでExcel文字化け防止
+    var text = '\uFEFF' + lines.join('\r\n'); // BOM付きでExcel文字化け防止
+    var fileName = '筋トレLog_' + DB.todayStr() + '.csv';
+    if (isNativeApp()) {
+      csvExportBusy = true;
+      var button = $('#exportCsvBtn');
+      if (button) button.disabled = true;
+      try {
+        var exporter = nativePlugin('CSVExport');
+        if (!exporter) throw new Error('CSV保存機能が読み込まれていません');
+        var result = await exporter.save({ text: text, fileName: fileName });
+        if (result && result.saved) toast('選択した保存先に「' + (result.fileName || fileName) + '」を保存しました');
+        else if (result && result.cancelled) toast('CSVの保存をキャンセルしました');
+        else throw new Error('保存結果を確認できませんでした');
+      } catch (e) {
+        toast('CSVを保存できませんでした。もう一度お試しください');
+        noteAppError('CSV保存', e);
+      } finally {
+        csvExportBusy = false;
+        if (button) button.disabled = false;
+      }
+      return;
+    }
+    var blob = new Blob([text], { type: 'text/csv' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = '筋トレLog_' + DB.todayStr() + '.csv';
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-    toast('記録と種目マスターをCSVに書き出しました');
+    toast('CSVのダウンロードを開始しました。ブラウザの保存先をご確認ください');
   }
 
   /* ================== CSVインポート ================== */
   /* ROW_HEADの見出し文字列 → 内部キー。列の並びが変わっていてもヘッダー名で判定する */
   var IMPORT_KEYS = ['date', 'wd', 'part', 'name', 'equip', 'setNo',
     'w', 'r', 'vol', 't', 'ts', 'd', 'sp', 'inc', 'cal', 'hr', 'memo', 'z',
-    'rowType', 'video', 'exerciseNote'];
+    'rowType', 'video', 'exerciseNote', 'coreMode', 'coreSide', 'seconds', 'reps', 'rightSeconds', 'rightReps'];
   var IMPORT_HEADER_KEY = ROW_HEAD.reduce(function (m, h, i) { m[h] = IMPORT_KEYS[i]; return m; }, {});
   var PREIMPORT_BACKUP_KEY = 'kintore_v1_preimport_backup';
   var CSV_LIMITS = {
@@ -3156,6 +3477,11 @@
       if (!part || !name) throw csvError(rowNo + '行目の部位・種目を確認してください');
       if (DB.PARTS.indexOf(part) < 0) throw csvError(rowNo + '行目の部位が不正です');
 
+      var coreCfg = null;
+      if (part === '体幹') {
+        if (['time', 'reps', 'hold'].indexOf(rec.coreMode) < 0 || ['左右別', 'なし'].indexOf(rec.coreSide) < 0) throw csvError(rowNo + '行目の体幹記録方式・左右別を確認してください');
+        coreCfg = { coreMode: rec.coreMode, coreSide: rec.coreSide === '左右別' };
+      }
       if (rowType === CSV_ROW_EXERCISE) {
         var videoRaw = limitedText(rec.video, INPUT_LIMITS.videoUrl).trim();
         var video = safeHttpsUrl(videoRaw);
@@ -3168,6 +3494,7 @@
           video: video,
           note: limitedText(rec.exerciseNote, INPUT_LIMITS.exerciseNote)
         };
+        if (coreCfg) { master.coreMode = coreCfg.coreMode; master.coreSide = coreCfg.coreSide; }
         if (exerciseIndex[exerciseKey] === undefined) {
           exerciseIndex[exerciseKey] = exercises.length;
           exercises.push(master);
@@ -3192,6 +3519,10 @@
         dayObj.order.push(entryKey);
       }
       var entryObj = dayObj.entries[entryKey];
+      if (coreCfg) {
+        if (entryObj.coreMode && (entryObj.coreMode !== coreCfg.coreMode || entryObj.coreSide !== coreCfg.coreSide)) throw csvError(rowNo + '行目の同一種目で体幹記録方式が混在しています');
+        entryObj.coreMode = coreCfg.coreMode; entryObj.coreSide = coreCfg.coreSide;
+      }
       var setNoText = String(rec.setNo == null ? '' : rec.setNo).trim();
       var setNo = setNoText ? importNumber(setNoText, 'セット番号', rowNo, 1, CSV_LIMITS.setNo) : entryObj.sets.length + 1;
       if (Math.floor(setNo) !== setNo) throw csvError(rowNo + '行目のセット番号は整数で入力してください');
@@ -3211,6 +3542,14 @@
             w: importNumber(rec.w, '重量', rowNo, 0, 10000),
             r: importNumber(rec.r, '回数', rowNo, 0, 100000)
           };
+      if (coreCfg) {
+        setObj = {};
+        ['seconds', 'reps', 'rightSeconds', 'rightReps'].forEach(function (k) {
+          var n = importNumber(rec[k], k, rowNo, 0, 86400);
+          if (n !== '' && !Number.isInteger(n)) throw csvError(rowNo + '行目の体幹の秒数・回数は整数にしてください');
+          setObj[k] = n;
+        });
+      }
       entryObj.sets[setNo - 1] = setObj;
     }
     return { dateOrder: dateOrder, byDate: byDate, rowCount: rowCount, exercises: exercises };
@@ -3274,6 +3613,39 @@
     if (calc.inited) { renderCalcResult(); return; }
     calc.inited = true;
 
+    var weightInput = $('#calcWeightVal');
+    var weightBeforeEdit = calc.w;
+    $('#calcWeightEdit').onclick = function () {
+      // iOSでも数字キーボードが開くよう、タップの処理内で直接フォーカスする。
+      weightInput.focus();
+      weightInput.select();
+    };
+    weightInput.addEventListener('focus', function () {
+      weightBeforeEdit = calc.w;
+      weightInput.select();
+    });
+    weightInput.addEventListener('blur', function () {
+      // 空欄・不正な貼り付けは元の値を保持。ダイヤルと同じ範囲・刻みに揃える。
+      var raw = weightInput.value.trim().replace(/[０-９]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0xFEE0);
+      }).replace(/．/g, '.');
+      if (/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw)) {
+        var value = Number(raw);
+        if (Number.isFinite(value)) calc.w = Math.round(Math.min(DIAL_MAX, value) * 10) / 10;
+      }
+      weightInput.value = calc.w.toFixed(1);
+      $('#dialScroll').scrollLeft = Math.round(calc.w * 10 * DIAL_PX);
+      renderCalcResult();
+    });
+    weightInput.addEventListener('keydown', function (e) {
+      if (e.isComposing) return;
+      if (e.key === 'Escape') weightInput.value = weightBeforeEdit.toFixed(1);
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        e.preventDefault();
+        weightInput.blur();
+      }
+    });
+
     // ダイヤルの目盛りトラックを生成（1kgごとに数字ラベル）
     var track = $('#dialTrack');
     track.style.width = (DIAL_MAX * 10 * DIAL_PX) + 'px';
@@ -3291,6 +3663,7 @@
       ticking = true;
       requestAnimationFrame(function () {
         ticking = false;
+        if (document.activeElement === weightInput) return;
         var v = Math.round(scroll.scrollLeft / DIAL_PX) / 10;
         v = Math.max(0, Math.min(DIAL_MAX, v));
         if (v !== calc.w) { calc.w = v; renderCalcResult(); }
@@ -3333,7 +3706,7 @@
   }
 
   function renderCalcResult() {
-    $('#calcWeightVal').innerHTML = calc.w.toFixed(1) + '<small> kg</small>';
+    if (document.activeElement !== $('#calcWeightVal')) $('#calcWeightVal').value = calc.w.toFixed(1);
     $('#calcRepsVal').textContent = calc.r;
     var rm = calc.w * rmCoef(calc.r);
     var rows = '';
@@ -3918,7 +4291,7 @@
        stopBeep() が即座に pause し、iOSに「この要素は再生許可済み」と認識されないことがある。 */
     stopBeep();
     unlockAudio();
-    askNotify();
+    if (!(wantsRestAlarm() && restAlarmState.supported)) askNotify();
     clearBadge();
     clearDeliveredTimerNotification(); // 前回のお知らせを通知センターから片づける
     stopVibrate();
@@ -3951,8 +4324,10 @@
        （アプリを開いたまま待っているとバナーが出ないのはこれが原因だった）
        「−30秒」などで終了時刻より手前に終わらせた場合だけ取り消す。 */
     if (timer.endAt - Date.now() > 1500) cancelTimerNotification();
-    playAlarmSound();
-    vibrateAlarm();
+    if (restAlarmState.endAt !== timer.endAt && restAlarmState.key !== timer.endAt + ':' + timerSettings.sound) {
+      playAlarmSound();
+      vibrateAlarm();
+    }
     showTimerNotification();
     setBadge();
     setTimerView('finished');
@@ -4122,12 +4497,6 @@
     if (!timer.twBound) { loadCustomMin(); bindTimer(); }
     if (!timer.running && !timer.finished) { setTimerView('setup'); scrollTwToCustom(); }
     renderTimer();
-    var note = $('#timerNote');
-    if (note) {
-      note.textContent = isNativeApp()
-        ? '終了時に音・通知・アプリバッジでお知らせします。作動中は画面が消えないようにします（iPhoneはアプリを開いている間に有効）。'
-        : '終了音を優先して鳴らします。その数秒間はYouTubeなどの音が止まる場合があります。YouTubeアプリへ切り替えるとiPhoneがPWAを停止するため、筋トレLogを画面に表示したまま使ってください。';
-    }
     /* タイマー画面を開いた時点で、通知が出せない状態なら先に知らせる。
        「開始して5分待ったが鳴らなかった」より前に気付けるようにする */
     refreshNotifWarning();
@@ -4163,76 +4532,10 @@
     $('#rowIgnoreSilent').hidden = !(isNativeApp() || canPickAudioSession());
     $('#ignoreSilentLabel').textContent = nativeAudio ? '消音モードでも鳴らす' : 'タイマー終了音を優先';
     $('#ignoreSilentNote').textContent = nativeAudio
-      ? 'アプリを開いているときのアラーム音のみ。閉じているときの通知音は iPhone の設定に従います'
+      ? (restAlarmState.supported
+        ? '音とシステム通知もオンにすると、ホーム画面・画面ロック中も鳴らします。初回にアラームの許可が必要です'
+        : 'アプリを表示中のみ有効です。画面ロック中やホーム画面で消音中にも鳴らすにはiOS 26以降が必要です')
       : '消音中やYouTube再生中も終了音を優先します。終了音の数秒間はYouTubeなどが止まる場合があります';
-    $('#soundDiagSection').hidden = !isNativeApp();
-    renderSoundDiag();
-  }
-  /* OSへの問い合わせが返ってこないと、欄が「確認中…」のまま固まって
-     何が起きているのか実機から読み取れない。時間切れをはっきり書き出す。 */
-  var DIAG_WAIT_MS = 4000;
-  /* key は soundDiag のどの欄を担当するか。work は表示する文言を返す。
-     失敗や時間切れのときに前回の値を残すと、たとえば許可が取れなくなった回でも
-     古い「granted」がそのまま出て、診断そのものが嘘をつく。
-     ここで必ず失敗として上書きしてから表示する。
-     ただし上書きしてよいのは、この問い合わせが今もその欄の最新である場合だけ。
-     欄ごとに番号を取り、成功・失敗・時間切れのどの道でも writeDiag を通す。
-     work の中で soundDiag を直接書かせないのも同じ理由で、
-     そうしないと追い越された問い合わせが表示だけ古い値に戻してしまう。 */
-  function fillDiag(sel, key, work) {
-    var el = $(sel);
-    if (!el) return Promise.resolve();
-    var token = claimDiag(key);
-    el.textContent = '確認中…';
-    var settled = false;
-    var p = Promise.resolve()
-      .then(work)
-      .then(function (text) {
-        settled = true;
-        writeDiag(key, token, (text === null || text === undefined) ? '取得できず' : String(text));
-      })
-      .catch(function (e) {
-        settled = true;
-        if (writeDiag(key, token, 'NG: ' + errText(e))) noteAppError('診断', e);
-      });
-    return withTimeout(p, DIAG_WAIT_MS, null).then(function () {
-      if (settled) return;
-      /* 時間切れを出したあとにこの問い合わせが遅れて返ってきても、
-         「返ってこなかった」という事実の方を残す。番号を進めて資格を失わせる。 */
-      if (writeDiag(key, token, '確認が返ってきません（時間切れ）')) claimDiag(key);
-    });
-  }
-
-  /* 「鳴らない」ときにどこで止まっているかを見せる */
-  function renderSoundDiag() {
-    if (!isNativeApp()) return;
-    // ここで例外が出ると全欄が初期表示のまま残り、実機では「何も出ていない」ようにしか見えない
-    try {
-      $('#diagPlay').textContent = soundDiag.play;
-      $('#diagNotif').textContent = soundDiag.notif;
-      $('#diagSched').textContent = soundDiag.sched;
-      // OSに聞く必要がない（アプリ側の設定で決まる）ので、その場で組み立てて出す
-      soundDiag.foreground = describeForegroundPresentation();
-      $('#diagForeground').textContent = soundDiag.foreground;
-      $('#diagErr').textContent = lastAppError || 'なし';
-    } catch (e) { noteAppError('診断表示', e); }
-
-    var ln = nativePlugin('LocalNotifications');
-    if (ln) {
-      fillDiag('#diagPerm', 'perm', function () {
-        return ln.checkPermissions().then(function (r) { return (r && r.display) || '不明'; });
-      });
-    } else {
-      writeDiag('perm', claimDiag('perm'), 'NG: プラグイン未登録');
-    }
-    // OSに聞かないと分からないものは、画面を開くたびに取り直す
-    fillDiag('#diagSession', 'session', refreshSessionDiag);
-    fillDiag('#diagPending', 'pending', refreshPendingDiag);
-    fillDiag('#diagDelivered', 'delivered', refreshDeliveredDiag);
-    fillDiag('#diagIos', 'ios', refreshIosNotifDiag);
-    fillDiag('#diagFiles', 'files', function () {
-      return readSoundFiles().then(describeSoundFiles);
-    });
   }
   var timerSettingsBound = false;
   function bindTimerSettingsOnce() {
@@ -4247,8 +4550,6 @@
       saveTimerSettings();
       renderTimerSettings();
       previewSound(timerSettings.sound);
-      // 試聴の結果（成功/失敗）を診断欄に反映させる
-      setTimeout(renderSoundDiag, 400);
       // 計測中に音色を変えたら、予約済みの通知も新しい音で取り直す
       if (timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
     });
@@ -4270,23 +4571,21 @@
       if (!isNativeApp()) { e.target.checked = true; return; }
       timerSettings.ignoreSilent = e.target.checked;
       saveTimerSettings();
-      applySilentModeSetting().then(renderSoundDiag);
+      applySilentModeSetting();
+      if (timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
     });
     $('#toggleNotifyOn').addEventListener('change', function (e) {
       timerSettings.notifyOn = e.target.checked;
       saveTimerSettings();
       if (timerSettings.notifyOn) {
-        askNotify();
+        if (!(wantsRestAlarm() && restAlarmState.supported)) askNotify();
         // 計測中に通知をONにしたら、その回の終了時刻からちゃんと鳴るようにする
         if (timer.running && !timer.paused && !timer.finished) scheduleTimerNotification(timer.endAt);
       } else {
         cancelTimerNotification(); // OFFにした以上、OSに預けた予約も取り消す
       }
-      setTimeout(renderSoundDiag, 400);
       setTimeout(refreshNotifWarning, 600);
     });
-    var testBtn = $('#testNotifBtn');
-    if (testBtn) testBtn.addEventListener('click', runNotifTest);
   }
 
   /* ================== タブ切り替え・初期化 ================== */
@@ -4313,15 +4612,31 @@
   bindSettings();
   bindAppReview();
   bindExInfo();
+  bindNumberEditing();
   bindDrum();
   bindCtime();
   bindGen();
   bindRepsDrum();
   loadTimerSettings();
+  initRestAlarm();
   bindTimerSettingsOnce();
   loadWeightStepSettings();
   initTheme();
   renderLog(true);
+
+  // iPhoneの前後の入力欄へ移動する矢印は、ピッカーの背後へフォーカスを移すため非表示にする。
+  // キーボード上の補助バー全体を隠し、確定・終了は画面内の「完了」等を使う。
+  // resize:none は従来のWebView/visualViewportによるレイアウト処理を保つための設定。
+  if (isNativeApp() && window.Capacitor.getPlatform() === 'ios') {
+    var keyboard = nativePlugin('Keyboard');
+    if (keyboard) {
+      keyboard.addListener('keyboardWillShow', function (info) { nativeNumberKeyboardHeight = info.keyboardHeight || 0; positionNumberEditing(); });
+      keyboard.addListener('keyboardWillHide', function () { nativeNumberKeyboardHeight = 0; positionNumberEditing(); });
+      keyboard.setAccessoryBarVisible({ isVisible: false }).catch(function (error) {
+        console.warn('キーボード補助バーを非表示にできませんでした', error);
+      });
+    }
+  }
 
   // 通知で付いたバッジを、コールド起動時にも必ず消す。
   // 最初からvisibleで起動した場合はvisibilitychangeが発火しないため、復帰時処理だけでは不足する。
