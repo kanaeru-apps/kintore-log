@@ -19,7 +19,7 @@
     "verify": "npm run check:syntax && npm run security:scan && npm run check:data-backup && npm run check:upgrade && npm run check:alarmkit && npm run check:csv-export && npm run check:core && npm run check:input-b && npm run check:rm-calculator && npm run build",
     "check:rm-calculator": "node tools/rm-calculator-check.js",
     "check:core": "node tools/core-check.js",
-    "check:input-b": "node tools/input-b-check.js"
+    "check:input-b": "node tools/input-b-check.js && node tools/interval-input-check.js"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.3",
