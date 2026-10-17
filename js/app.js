@@ -378,6 +378,7 @@
 
   /* iOSではキーボードが開いても固定要素の基準の高さは変わらないため、
      visualViewportの可視領域に収め、モーダルの中だけをスクロールする。 */
+  var exInfoKeyboardHeight = 0;
   var exInfoViewportFrame = 0;
   var exInfoFocusTimer = 0;
   function resetExInfoViewport() {
@@ -397,7 +398,10 @@
     }
     var viewport = window.visualViewport;
     var top = viewport ? viewport.offsetTop : 0;
-    var height = viewport ? viewport.height : window.innerHeight;
+    var bottom = viewport ? top + viewport.height : window.innerHeight;
+    // resize:none のiOSではネイティブのキーボード高さも使う。
+    if (exInfoKeyboardHeight > 0) bottom = Math.min(bottom, window.innerHeight - exInfoKeyboardHeight);
+    var height = Math.max(0, bottom - top);
     modal.style.setProperty('--ex-info-top', (top + height / 2) + 'px');
     modal.style.setProperty('--ex-info-height', Math.max(0, height - 32) + 'px');
     modal.classList.add('editing');
@@ -441,6 +445,21 @@
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', scheduleExInfoViewport);
       window.visualViewport.addEventListener('scroll', scheduleExInfoViewport);
+    }
+    var keyboard = isNativeApp() ? nativePlugin('Keyboard') : null;
+    if (keyboard) {
+      var onKeyboardShow = function (info) {
+        exInfoKeyboardHeight = Math.max(0, Number(info.keyboardHeight) || 0);
+        scheduleExInfoViewport();
+      };
+      var onKeyboardHide = function () {
+        exInfoKeyboardHeight = 0;
+        scheduleExInfoViewport();
+      };
+      keyboard.addListener('keyboardWillShow', onKeyboardShow);
+      keyboard.addListener('keyboardDidShow', onKeyboardShow);
+      keyboard.addListener('keyboardWillHide', onKeyboardHide);
+      keyboard.addListener('keyboardDidHide', onKeyboardHide);
     }
     // 入力したら即保存
     $('#exModalBody').addEventListener('change', function (e) {
@@ -1110,6 +1129,7 @@
   }
 
   function closeGen() {
+    closeGenInput(false);
     $('#genBackdrop').classList.remove('show');
     $('#genSheet').classList.remove('show');
     GEN_ALL_INPUT.forEach(function (id) { $(id).blur(); });
@@ -1176,26 +1196,111 @@
       var p = b.dataset.step.split(',');
       setGen(p[0], genCfg[p[0]] + (+p[1]));
     });
-    // 入力中は値を直さない（「3」を打つ途中で勝手に丸めない・分を消している最中に0を書き戻さない）。
-    // 確定（blur）したときに初めて範囲へ収め、分と秒に割り直して表示する
-    ['work', 'rest'].forEach(function (k) {
-      GEN_TIME_FIELD[k].forEach(function (id) {
-        $(id).addEventListener('input', function () {
-          genCfg[k] = clampGen(k, readGenTime(k));
-          renderGenPreview();
-        });
-        $(id).addEventListener('change', function () { setGen(k, genCfg[k]); });
+    bindGenInput();
+  }
+
+  // 設定シートから独立した入力フォーム。編集中は下書きだけを持ち、完了時に反映する。
+  var genInputTarget = null;
+  var genInputKeyboardHeight = 0;
+  var GEN_INPUT_META = {
+    genWorkM: ['work', '分', '高強度の長さ'],
+    genWorkS: ['work', '秒', '高強度の長さ'],
+    genRestM: ['rest', '分', '休憩の長さ'],
+    genRestS: ['rest', '秒', '休憩の長さ'],
+    genReps: ['reps', '本', 'くり返す本数']
+  };
+
+  function updateGenInputViewport() {
+    if (!genInputTarget) return;
+    var viewport = window.visualViewport;
+    var top = viewport ? viewport.offsetTop : 0;
+    var bottom = viewport ? top + viewport.height : window.innerHeight;
+    if (genInputKeyboardHeight > 0) bottom = Math.min(bottom, window.innerHeight - genInputKeyboardHeight);
+    var sheet = $('#genInputSheet');
+    sheet.style.maxHeight = Math.max(0, bottom - top) + 'px';
+    sheet.style.top = Math.max(top, bottom - sheet.offsetHeight) + 'px';
+  }
+
+  function openGenInput(id) {
+    if (genInputTarget || !genTarget) return;
+    var meta = GEN_INPUT_META[id];
+    if (!meta) return;
+    genInputTarget = id;
+    var input = $('#genInputValue');
+    input.value = $('#' + id).value;
+    $('#genInputTitle').textContent = meta[2];
+    $('#genInputUnit').textContent = meta[1];
+    $('#genInputBackdrop').hidden = false;
+    $('#genInputSheet').hidden = false;
+    $('#genSheet').inert = true;
+    $('#genSheet').classList.add('input-open');
+    updateGenInputViewport();
+    // タップと同じイベント内でフォーカスし、iOSでもキーボードを開く。
+    input.focus({ preventScroll: true });
+    caretSelectAll(input);
+  }
+
+  function closeGenInput(commit) {
+    if (!genInputTarget) return;
+    var id = genInputTarget;
+    var meta = GEN_INPUT_META[id];
+    var raw = $('#genInputValue').value.trim();
+    if (commit && /^[0-9]+$/.test(raw)) {
+      $('#' + id).value = raw;
+      setGen(meta[0], meta[0] === 'reps' ? Number(raw) : readGenTime(meta[0]));
+    }
+    genInputTarget = null;
+    $('#genInputValue').blur();
+    $('#genInputBackdrop').hidden = true;
+    $('#genInputSheet').hidden = true;
+    $('#genSheet').inert = false;
+    $('#genSheet').classList.remove('input-open');
+    $('#genDo').focus({ preventScroll: true });
+  }
+
+  function bindGenInput() {
+    GEN_ALL_INPUT.forEach(function (selector) {
+      var input = $(selector);
+      input.addEventListener('click', function () { openGenInput(input.id); });
+      input.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openGenInput(input.id);
+        }
       });
     });
-    $('#genReps').addEventListener('input', function (e) {
-      var v = parseInt(e.target.value, 10);
-      if (isNaN(v)) return;
-      genCfg.reps = clampGen('reps', v);
-      renderGenPreview();
+    $('#genInputDone').onclick = function () { closeGenInput(true); };
+    $('#genInputCancel').onclick = function () { closeGenInput(false); };
+    $('#genInputBackdrop').onclick = function () { closeGenInput(false); };
+    ['#genInputDone', '#genInputCancel'].forEach(function (id) {
+      $(id).addEventListener('pointerdown', function (event) { event.preventDefault(); });
     });
-    $('#genReps').addEventListener('change', function () { setGen('reps', genCfg.reps); });
-
-    bindCaretPlacement('#genSheet', 'input.num', caretSelectAll);
+    $('#genInputValue').addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === 'Escape') {
+        event.preventDefault();
+        closeGenInput(event.key === 'Enter');
+      }
+    });
+    window.addEventListener('resize', updateGenInputViewport);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updateGenInputViewport);
+      window.visualViewport.addEventListener('scroll', updateGenInputViewport);
+    }
+    var keyboard = isNativeApp() ? nativePlugin('Keyboard') : null;
+    if (keyboard) {
+      ['keyboardWillShow', 'keyboardDidShow'].forEach(function (name) {
+        keyboard.addListener(name, function (info) {
+          genInputKeyboardHeight = info.keyboardHeight || 0;
+          updateGenInputViewport();
+        });
+      });
+      ['keyboardWillHide', 'keyboardDidHide'].forEach(function (name) {
+        keyboard.addListener(name, function () {
+          genInputKeyboardHeight = 0;
+          updateGenInputViewport();
+        });
+      });
+    }
   }
 
   /* ================== 記録タブ ================== */

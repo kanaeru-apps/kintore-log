@@ -492,8 +492,8 @@
   <div id="genSheet" role="dialog" aria-label="インターバルを一括作成">
     <div class="drum-head">
       <button id="genCancel" class="drum-cancel">キャンセル</button>
-      <span class="drum-title">⚡ INTERVAL</span>
-      <button id="genDo" class="drum-done">生成</button>
+      <span class="drum-title">⚡ インターバル</span>
+      <button id="genDo" class="drum-done">登録</button>
     </div>
     <div class="gen-body">
       <div class="gen-row">
@@ -501,9 +501,9 @@
         <label for="genWorkS">高強度の長さ</label>
         <div class="stepper time">
           <button type="button" data-step="work,-5" aria-label="WORKを5秒減らす">−</button>
-          <input type="text" id="genWorkM" class="num" inputmode="numeric" pattern="[0-9]*" aria-label="WORKの分">
+          <input type="text" id="genWorkM" readonly class="num" inputmode="numeric" pattern="[0-9]*" aria-label="WORKの分">
           <span class="tu">分</span>
-          <input type="text" id="genWorkS" class="num" inputmode="numeric" pattern="[0-9]*" aria-label="WORKの秒">
+          <input type="text" id="genWorkS" readonly class="num" inputmode="numeric" pattern="[0-9]*" aria-label="WORKの秒">
           <span class="tu">秒</span>
           <button type="button" data-step="work,5" aria-label="WORKを5秒増やす">＋</button>
         </div>
@@ -511,12 +511,12 @@
       </div>
       <div class="gen-row">
         <span class="zchip num z-rec">REST</span>
-        <label for="genRestS">回復の長さ</label>
+        <label for="genRestS">休憩の長さ</label>
         <div class="stepper time">
           <button type="button" data-step="rest,-5" aria-label="RESTを5秒減らす">−</button>
-          <input type="text" id="genRestM" class="num" inputmode="numeric" pattern="[0-9]*" aria-label="RESTの分">
+          <input type="text" id="genRestM" readonly class="num" inputmode="numeric" pattern="[0-9]*" aria-label="RESTの分">
           <span class="tu">分</span>
-          <input type="text" id="genRestS" class="num" inputmode="numeric" pattern="[0-9]*" aria-label="RESTの秒">
+          <input type="text" id="genRestS" readonly class="num" inputmode="numeric" pattern="[0-9]*" aria-label="RESTの秒">
           <span class="tu">秒</span>
           <button type="button" data-step="rest,5" aria-label="RESTを5秒増やす">＋</button>
         </div>
@@ -527,13 +527,26 @@
         <label for="genReps">くり返す本数</label>
         <div class="stepper">
           <button type="button" data-step="reps,-1" aria-label="本数を減らす">−</button>
-          <input type="text" id="genReps" class="num" inputmode="numeric" pattern="[0-9]*">
+          <input type="text" id="genReps" readonly class="num" inputmode="numeric" pattern="[0-9]*">
           <button type="button" data-step="reps,1" aria-label="本数を増やす">＋</button>
         </div>
         <span class="gen-unit">本</span>
       </div>
       <p class="gen-note">合計 <b class="num" id="genTotal">—</b> ・ <b class="num" id="genCount">0</b> セッション</p>
       <p class="gen-mode" id="genMode"></p>
+    </div>
+  </div>
+
+  <div id="genInputBackdrop" hidden></div>
+  <div id="genInputSheet" role="dialog" aria-modal="true" aria-labelledby="genInputTitle" hidden>
+    <div class="gen-input-field">
+      <input id="genInputValue" class="num" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" aria-labelledby="genInputTitle" autocomplete="off" enterkeyhint="done">
+      <span id="genInputUnit"></span>
+    </div>
+    <div class="drum-head">
+      <button id="genInputCancel" class="drum-cancel" type="button">キャンセル</button>
+      <span id="genInputTitle" class="drum-title"></span>
+      <button id="genInputDone" class="drum-done" type="button">完了</button>
     </div>
   </div>
 

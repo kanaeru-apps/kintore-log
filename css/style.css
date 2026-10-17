@@ -1698,7 +1698,7 @@ button { cursor: pointer; }
   padding-bottom: calc(14px + env(safe-area-inset-bottom));
 }
 #genSheet.show { transform: translate(-50%, 0); }
-#genSheet .drum-title { font-family: var(--font-num); letter-spacing: 0.16em; color: var(--accent); }
+#genSheet .drum-title { letter-spacing: 0; color: var(--accent); }
 
 .gen-body { padding: 10px 18px 6px; }
 .gen-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -2168,3 +2168,26 @@ body.number-editing #tabbar { visibility: hidden; }
 
 .drum-unit { display: flex; align-items: center; gap: 8px; right: 30px; }
 .drum-arrows { display: flex; flex-direction: column; gap: 2px; font-size: 8px; line-height: 1; color: inherit; }
+
+/* インターバルも重量入力と同じ、入力欄＋キャンセル／完了の構成にする。 */
+#genSheet.input-open { visibility: hidden; pointer-events: none; }
+#genInputBackdrop { position: fixed; inset: 0; z-index: 60; }
+#genInputSheet {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: 480px; box-sizing: border-box; z-index: 61;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 22px 22px 0 0; overflow-y: auto; overscroll-behavior: contain;
+}
+#genInputBackdrop[hidden], #genInputSheet[hidden] { display: none; }
+.gen-input-field {
+  display: flex; align-items: center; gap: 12px; margin: 16px;
+  padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--panel2);
+}
+#genInputValue { width: 100%; min-width: 0; font-size: 32px; background: transparent; border: none; outline: none; }
+#genInputUnit { color: var(--dim); flex-shrink: 0; }
+#genInputSheet .drum-head { border-top: 1px solid var(--line); gap: 8px; }
+#genInputSheet .drum-title { text-align: center; }
+#genInputDone { background: var(--accent); color: var(--ink); border-radius: 10px; padding: 12px 18px; flex-shrink: 0; }
+
+#genInputSheet .drum-head { background: var(--panel2); padding: 8px 12px; }
