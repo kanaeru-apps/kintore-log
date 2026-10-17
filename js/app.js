@@ -381,7 +381,10 @@
   var exInfoKeyboardHeight = 0;
   var exInfoViewportFrame = 0;
   var exInfoFocusTimer = 0;
+  var exInfoEditingInput = null;
   function resetExInfoViewport() {
+    $('#exInfoKeyboardBar').hidden = true;
+    exInfoEditingInput = null;
     var modal = $('#exModal');
     modal.classList.remove('editing');
     modal.style.removeProperty('--ex-info-top');
@@ -390,17 +393,24 @@
   function updateExInfoViewport() {
     exInfoViewportFrame = 0;
     var modal = $('#exModal');
+    var bar = $('#exInfoKeyboardBar');
     var input = document.activeElement;
+    if (bar.contains(input)) input = exInfoEditingInput;
     if (!modal.classList.contains('show') || !input ||
         !modal.contains(input) || !input.matches('input, textarea')) {
       resetExInfoViewport();
       return;
     }
+    exInfoEditingInput = input;
     var viewport = window.visualViewport;
     var top = viewport ? viewport.offsetTop : 0;
     var bottom = viewport ? top + viewport.height : window.innerHeight;
     // resize:none のiOSではネイティブのキーボード高さも使う。
     if (exInfoKeyboardHeight > 0) bottom = Math.min(bottom, window.innerHeight - exInfoKeyboardHeight);
+    bar.hidden = false;
+    $('#exInfoKeyboardLabel').textContent = input.id === 'exVideoInput' ? '参考動画URL' : 'フォームメモ';
+    bar.style.top = Math.max(top, bottom - bar.offsetHeight) + 'px';
+    bottom = Math.max(top, bottom - bar.offsetHeight);
     var height = Math.max(0, bottom - top);
     modal.style.setProperty('--ex-info-top', (top + height / 2) + 'px');
     modal.style.setProperty('--ex-info-height', Math.max(0, height - 32) + 'px');
@@ -416,6 +426,15 @@
         (visibleBottom - visibleTop - field.height) / 2));
     }
   }
+  function finishExInfoEditing() {
+    var input = exInfoEditingInput;
+    // blurで既存のchange処理（URL検証・保存）を実行する。メモの改行はそのまま。
+    if (input) input.blur();
+    window.clearTimeout(exInfoFocusTimer);
+    resetExInfoViewport();
+    $('#exModalClose').focus({ preventScroll: true });
+  }
+
   function scheduleExInfoViewport() {
     if (!exInfoViewportFrame) {
       exInfoViewportFrame = window.requestAnimationFrame(updateExInfoViewport);
@@ -432,6 +451,10 @@
   }
 
   function bindExInfo() {
+    $('#exInfoKeyboardDone').addEventListener('pointerdown', function (event) {
+      event.preventDefault(); // blurでボタンが消える前にclickを受け取る。
+    });
+    $('#exInfoKeyboardDone').onclick = finishExInfoEditing;
     $('#exModalClose').onclick = closeExInfo;
     $('#exModalBackdrop').onclick = closeExInfo;
     $('#exModalBody').addEventListener('focusin', function () {

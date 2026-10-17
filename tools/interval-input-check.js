@@ -59,6 +59,9 @@ console.log('PASS: confirm/cancel, seconds normalization, empty/invalid input, l
 // URL入力のiOS resize:noneと通常のvisualViewportの両方を検証する。
 const properties = {};
 const modal = $('#exModal');
+const doneBar = $('#exInfoKeyboardBar');
+doneBar.contains = () => false;
+doneBar.offsetHeight = 64;
 modal.classList.contains = () => true;
 modal.contains = () => true;
 modal.style.setProperty = (key, value) => { properties[key] = value; };
@@ -69,15 +72,34 @@ ctx.document = { activeElement: { matches: () => true, getBoundingClientRect: ()
 vm.runInContext(source.slice(source.indexOf('  var exInfoKeyboardHeight'), source.indexOf('  function scheduleExInfoViewport')), ctx);
 ctx.exInfoKeyboardHeight = 320;
 ctx.updateExInfoViewport();
-assert.equal(properties['--ex-info-height'], '498px');
-assert.equal(properties['--ex-info-top'], '265px');
+assert.equal(properties['--ex-info-height'], '434px');
+assert.equal(properties['--ex-info-top'], '233px');
+assert.equal(doneBar.hidden, false);
+assert.equal(doneBar.style.top, '466px');
 assert(modal.scrollTop > 0, 'URL input scrolls into visible area');
 ctx.exInfoKeyboardHeight = 0;
 ctx.window.visualViewport = { offsetTop: 20, height: 450 };
 ctx.updateExInfoViewport();
-assert.equal(properties['--ex-info-height'], '418px');
-assert.equal(properties['--ex-info-top'], '245px');
+assert.equal(properties['--ex-info-height'], '354px');
+assert.equal(properties['--ex-info-top'], '213px');
 ctx.document.activeElement = null;
 ctx.updateExInfoViewport();
 assert.equal(properties['--ex-info-height'], undefined);
+assert.equal(doneBar.hidden, true);
 console.log('PASS: YouTube URL native keyboard height, viewport positioning, scroll and focus cleanup');
+
+ctx.window.clearTimeout = () => {};
+for (const id of ['exVideoInput', 'exNoteInput']) {
+  let blurred = false;
+  const input = { id, matches: () => true,
+    getBoundingClientRect: () => ({ top: 650, bottom: 690, height: 40 }),
+    blur() { blurred = true; ctx.document.activeElement = null; } };
+  ctx.document.activeElement = input;
+  ctx.updateExInfoViewport();
+  assert.equal($('#exInfoKeyboardLabel').textContent, id === 'exVideoInput' ? '参考動画URL' : 'フォームメモ');
+  ctx.finishExInfoEditing();
+  assert(blurred, 'Done blurs the field to run its existing change/save handler');
+  assert.equal(doneBar.hidden, true);
+  assert.equal(ctx.exInfoEditingInput, null);
+}
+console.log('PASS: Done exits URL and multiline memo input and clears keyboard toolbar');

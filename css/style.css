@@ -2191,3 +2191,18 @@ body.number-editing #tabbar { visibility: hidden; }
 #genInputDone { background: var(--accent); color: var(--ink); border-radius: 10px; padding: 12px 18px; flex-shrink: 0; }
 
 #genInputSheet .drum-head { background: var(--panel2); padding: 8px 12px; }
+
+/* URL・フォームメモの入力終了操作を、スクロール領域の外に固定する。 */
+#exInfoKeyboardBar {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 1201;
+  width: min(100%, 480px); box-sizing: border-box;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 16px; background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 14px 14px 0 0;
+}
+#exInfoKeyboardBar[hidden] { display: none; }
+#exInfoKeyboardLabel { color: var(--dim); font-size: 13px; }
+#exInfoKeyboardDone {
+  border: 0; border-radius: 9px; background: var(--volt); color: var(--ink);
+  padding: 12px 20px; font-size: 14px; font-weight: 800;
+}
