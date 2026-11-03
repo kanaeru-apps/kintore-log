@@ -1,5 +1,5 @@
 /* 筋トレLog Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v74-rm-arrows';
+const CACHE = 'kintore-v75-interval-labels';
 const ASSETS = [
   './',
   './index.html',

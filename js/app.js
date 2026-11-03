@@ -135,8 +135,8 @@
   var CARDIO_KEYS_ALL = ['t', 'ts'].concat(CARDIO_FIELDS.map(function (f) { return f.k; }));
   /* インターバルの強度ラベル。csvはスプレッドシート・CSVに書き出す文字列 */
   var ZONES = {
-    hi: { label: 'WORK', cls: 'z-hi', csv: 'WORK' },
-    rec: { label: 'REST', cls: 'z-rec', csv: 'REST' }
+    hi: { label: '運動時間', cls: 'z-hi', csv: 'WORK' },
+    rec: { label: '休憩時間', cls: 'z-rec', csv: 'REST' }
   };
   /* チップをタップしたときの巡回順（WORK → REST → タグなし） */
   var ZONE_ORDER = ['hi', 'rec', ''];
@@ -1178,7 +1178,7 @@
     $('#genCount').textContent = String(count);
     $('#genMode').textContent = genTarget && genWouldReplace(genTarget)
       ? '空のセッションを置き換えます'
-      : '入力済みの記録は残し、末尾に追加します';
+      : '';
   }
 
   function setGen(k, v) {
@@ -1226,10 +1226,10 @@
   var genInputTarget = null;
   var genInputKeyboardHeight = 0;
   var GEN_INPUT_META = {
-    genWorkM: ['work', '分', '高強度の長さ'],
-    genWorkS: ['work', '秒', '高強度の長さ'],
-    genRestM: ['rest', '分', '休憩の長さ'],
-    genRestS: ['rest', '秒', '休憩の長さ'],
+    genWorkM: ['work', '分', '運動時間'],
+    genWorkS: ['work', '秒', '運動時間'],
+    genRestM: ['rest', '分', '休憩時間'],
+    genRestS: ['rest', '秒', '休憩時間'],
     genReps: ['reps', '本', 'くり返す本数']
   };
 

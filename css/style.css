@@ -493,6 +493,9 @@ button { cursor: pointer; }
 
 /* ---------------- インターバル（WORK / REST） ---------------- */
 .zchip {
+  font-family: var(--font-body);
+  font-weight: 700;
+  white-space: nowrap;
   flex-shrink: 0;
   min-width: 52px;
   padding: 2px 8px;
@@ -2206,3 +2209,6 @@ body.number-editing #tabbar { visibility: hidden; }
   border: 0; border-radius: 9px; background: var(--volt); color: var(--ink);
   padding: 12px 20px; font-size: 14px; font-weight: 800;
 }
+
+/* 空の追記説明は余白も表示しない。 */
+.gen-mode:empty { display: none; }
