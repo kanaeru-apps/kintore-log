@@ -1,5 +1,5 @@
 /* 筋トレLog Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v75-interval-labels';
+const CACHE = 'kintore-v76-history-calendar';
 const ASSETS = [
   './',
   './index.html',

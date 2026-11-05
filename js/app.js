@@ -2077,14 +2077,11 @@
   /* ---- ワークアウトデイ（カレンダー） ----
      v0.11.0でグラフタブから移設した。ここで選んだ「日」と「部位」が、
      そのまま下の履歴一覧の絞り込みも兼ねる（カレンダーは見るだけのものではなくなった） */
-  var HIST_CAL_OPEN_KEY = 'kintore_hist_cal_open';
-  var histCal ={ part: 'ALL', year: null, month: null, date: null, open: true };
+  var histCal ={ part: 'ALL', year: null, month: null, date: null };
   (function initHistCal() {
     var t = parseDate(DB.todayStr());
     histCal.year = t.getFullYear();
     histCal.month = t.getMonth();
-    /* 開閉だけは端末に残す。選んだ日はアプリを開いている間だけの状態にする（次に開いたら全件から始めたいため） */
-    try { histCal.open = localStorage.getItem(HIST_CAL_OPEN_KEY) !== '0'; } catch (err) { /* 参照できなくても既定の「開」でよい */ }
   })();
 
   /* 部位ごとに「記録がある日（has）」と「実際に数値が入っている日（trained）」を集める。
@@ -2165,14 +2162,7 @@
       : '';
   }
 
-  function applyHistCalOpen() {
-    $('#calCard').classList.toggle('collapsed', !histCal.open);
-    $('#calToggle').classList.toggle('closed', !histCal.open);
-    $('#calToggle').setAttribute('aria-expanded', histCal.open ? 'true' : 'false');
-  }
-
   function renderHistory() {
-    applyHistCalOpen();
     renderHistCalPartChips();
     renderHistCalendar();
     renderHistFilterBar();
@@ -2233,8 +2223,8 @@
     return '<div class="h-body">' + rows +
       (w.memo ? '<p class="h-memo">' + esc(w.memo) + '</p>' : '') +
       '<div class="h-actions">' +
-        '<button class="link" data-action="open-day">この日を開く</button>' +
-        '<button class="link danger" data-action="del-day">この日の記録を削除</button>' +
+        '<button class="link" data-action="open-day">詳細確認</button>' +
+        '<button class="link danger" data-action="del-day">記録削除</button>' +
       '</div>' +
     '</div>';
   }
@@ -2254,11 +2244,6 @@
   }
 
   function bindHistory() {
-    $('#calToggle').addEventListener('click', function () {
-      histCal.open = !histCal.open;
-      applyHistCalOpen();
-      try { localStorage.setItem(HIST_CAL_OPEN_KEY, histCal.open ? '1' : '0'); } catch (err) { /* 保存できなくても表示には支障がない */ }
-    });
     $('#calPrev').addEventListener('click', function () { shiftHistMonth(-1); });
     $('#calNext').addEventListener('click', function () { shiftHistMonth(1); });
     $('#calGrid').addEventListener('click', function (e) {
