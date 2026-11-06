@@ -1,0 +1,48 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const values=new Map();let fail=false;
+const storage={getItem:k=>values.get(k)||null,setItem:(k,v)=>{if(fail)throw Error('quota');values.set(k,String(v));},removeItem:k=>values.delete(k)};
+function boot(){const c={console,localStorage:storage};vm.createContext(c);vm.runInContext(fs.readFileSync('js/db.js','utf8'),c);return c.DB;}
+let db=boot();const day='2026-11-06';
+const ex=db.getExercises().find(e=>e.part==='胸');
+const existing=db.addEntry(day,ex.id); db.updateSet(day,existing.id,0,'r',10);db.setMemo(day,'keep me');
+const before=JSON.stringify(db.getWorkout(day));
+const id=db.saveMenu(null,'胸の日',[{...ex,exId:ex.id,count:2,sets:[{w:25,r:8},{w:30,r:6}]}],false);
+assert.equal(JSON.stringify(db.getWorkout(day)),before,'save does not change daily log');
+assert.equal(db.getMenus()[0].entries[0].sets[0].r,'');
+assert.equal(db.appendMenu(day,id),1);
+assert.equal(JSON.stringify(db.getWorkout(day).entries[0]),JSON.stringify(JSON.parse(before).entries[0]));
+assert.equal(db.getWorkout(day).memo,'keep me');
+const appended=db.getWorkout(day).entries[1];assert.notEqual(appended.id,existing.id);
+db.updateSet(day,appended.id,0,'r',20);assert.equal(db.getMenus()[0].entries[0].sets[0].r,'');
+db=boot();assert.equal(db.getMenus()[0].name,'胸の日');
+const saved=db.exportStateJSON();db.deleteMenu(id);assert.equal(db.getMenus().length,0);assert(db.restoreStateJSON(saved));assert.equal(db.getMenus().length,1);
+const mixed=db.getExercises().filter(e=>e.part==='体幹'||e.part==='有酸素').slice(-3).map(e=>({...e,exId:e.id,count:1,sets:[{seconds:20,reps:5,t:10,d:2}]}));
+const mixedId=db.saveMenu(null,'mixed',mixed,true);db.appendMenu(day,mixedId);
+assert.equal(db.getMenus().find(m=>m.id===mixedId).entries.length,mixed.length);
+const full=db.exportStateJSON();fail=true;assert.throws(()=>db.saveMenu(null,'failed',[{...ex,count:3}],false));assert.equal(db.exportStateJSON(),full);assert.throws(()=>db.appendMenu(day,id));assert.equal(db.exportStateJSON(),full);fail=false;
+assert.throws(()=>db.saveMenu(null,'',[],false));assert.throws(()=>db.saveMenu(null,'bad',[{...ex,count:0}],false));
+db.deleteExercise(ex.id);db.appendMenu('2026-11-07',id);assert(db.getExercise(db.getWorkout('2026-11-07').entries[0].exId));
+console.log('PASS: menu save/load, isolated edits, append preservation, restore, deleted exercise, validation and storage rollback');
+
+// Exercise UI event wiring against the actual DB, without browser or device claims.
+const elements=new Map();
+function element(id){if(!elements.has(id))elements.set(id,{id,innerHTML:'',textContent:'',style:{},handlers:{},dataset:{},addEventListener(name,fn){this.handlers[name]=fn;},focus(){},showModal(){this.open=true;},close(){this.open=false;}});return elements.get(id);}
+const dialog=element('setMenuDialog');let confirmed=true, notices=[];
+const uiContext={DB:db,console,document:{getElementById:element},window:{innerHeight:800,addEventListener(){}},confirm:()=>confirmed,setTimeout};
+vm.createContext(uiContext);vm.runInContext(fs.readFileSync('js/set-menus.js','utf8'),uiContext);
+uiContext.SetMenus.init({date:()=> '2026-11-08',changed:()=>{},notify:m=>notices.push(m)});
+function click(action,extra={}){dialog.handlers.click({target:{closest:()=>({dataset:{menuAction:action,...extra}})}});}
+function input(id,value,dataset={}){dialog.handlers.input({target:{id,value,dataset}});}
+function toggle(id){dialog.handlers.change({target:{dataset:{ex:id},checked:true}});}
+element('addSetMenuBtn').onclick();click('new');input('menuName','UI menu');click('pick');
+const picks=db.getExercises().slice(0,2);picks.forEach(e=>toggle(e.id));click('selected');
+assert.match(element('setMenuBody').innerHTML,/value="3"/);
+input('', '4', {count:'0'});click('down',{index:'0'});click('save');
+assert.equal(element('setMenuError').textContent,'');
+const uiMenu=db.getMenus().find(m=>m.name==='UI menu');assert(uiMenu);assert.equal(uiMenu.entries.length,2);assert.equal(uiMenu.entries[1].sets.length,4);
+assert.equal(db.getWorkout('2026-11-08'),null,'UI save is not workout insertion');
+click('apply',{id:uiMenu.id});assert.equal(db.getWorkout('2026-11-08').entries.length,2);assert.equal(dialog.open,false);
+element('addSetMenuBtn').onclick();click('edit',{id:uiMenu.id});input('menuName','discard this');confirmed=false;element('setMenuClose').onclick();assert(dialog.open);confirmed=true;element('setMenuClose').onclick();assert.equal(db.getMenus().find(m=>m.id===uiMenu.id).name,'UI menu');
+element('addSetMenuBtn').onclick();click('today');input('menuName','snapshot');click('save');assert(db.getMenus().find(m=>m.name==='snapshot'));
+console.log('PASS: menu UI new/pick/reorder/count/save/apply/day snapshot and discard confirmation');

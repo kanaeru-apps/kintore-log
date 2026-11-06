@@ -1741,6 +1741,7 @@
     });
 
     $('#addExerciseBtn').onclick = openSheet;
+    SetMenus.init({ date: function () { return ui.date; }, changed: function () { renderLog(); writeNativeBackup(); }, notify: toast });
 
     // 種目カード内の操作（イベント委譲）
     $('#entries').addEventListener('click', function (e) {
@@ -2425,14 +2426,14 @@
   function restoreNativeBackupIfEmpty() {
     var fsPlugin = nativePlugin('Filesystem');
     if (!isNativeApp() || !fsPlugin) return;
-    if (DB.datesWithData().length) return;
+    if (DB.datesWithData().length || DB.getMenus().length) return;
     nativeRestorePending = true;
     fsPlugin.readFile({ path: NATIVE_BACKUP_FILE, directory: 'DOCUMENTS', encoding: 'utf8' })
       .then(function (res) {
         nativeRestorePending = false;
         var data = res && res.data;
         if (!data) return;
-        if (DB.datesWithData().length) return; // 読み込み待ちの間に記録が入った場合は上書きしない
+        if (DB.datesWithData().length || DB.getMenus().length) return; // 読み込み待ちの間に記録が入った場合は上書きしない
         if (!DB.restoreStateJSON(data)) return;
         renderLog();
         renderSettings();

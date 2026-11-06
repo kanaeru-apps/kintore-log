@@ -2192,3 +2192,39 @@ body.number-editing #tabbar { visibility: hidden; }
 
 /* 空の追記説明は余白も表示しない。 */
 .gen-mode:empty { display: none; }
+
+/* Saved workout menus */
+.menu-outline { width: 100%; border: 1px solid var(--accent); color: var(--accent); background: var(--panel); margin: 0 0 12px; padding: 16px; font-size: 16px; font-weight: 800; }
+#setMenuDialog { position: fixed; inset: 10px 0 auto; margin: 0 auto; width: calc(100% - 20px); max-width: 560px; max-height: calc(100dvh - 20px); padding: 0; border: 1px solid var(--line); border-radius: 22px; background: var(--bg); color: var(--text); overflow: hidden; }
+#setMenuDialog[open] { display: flex; flex-direction: column; }
+#setMenuDialog::backdrop { background: rgba(0,0,0,.7); }
+.menu-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:14px 12px; flex-shrink:0; border-bottom:1px solid var(--line); }
+.menu-head h3 { flex:1; margin:0; font-size:18px; }
+.menu-head button { min-width:44px; min-height:44px; }
+.menu-body { overflow-y:auto; overscroll-behavior:contain; padding:16px; flex:1; min-height:0; }
+.menu-hint { color:var(--dim); font-size:13px; line-height:1.65; overflow-wrap:anywhere; margin:8px 0 14px; }
+.menu-card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:14px; margin-bottom:12px; }
+.menu-card h4 { margin:0; overflow-wrap:anywhere; }
+.menu-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+#setMenuDialog .btn { min-height:44px; margin:0; }
+.menu-actions .btn { padding:8px 12px; }
+#setMenuDialog input:not([type=checkbox]), #setMenuDialog select { background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:12px; font-size:16px; min-height:44px; }
+#menuName, #menuSearch { width:100%; box-sizing:border-box; }
+.menu-label { display:block; margin-bottom:8px; }
+#setMenuDialog .menu-count { width:72px; padding:8px; }
+.menu-check { display:flex; align-items:center; gap:12px; margin-top:20px; font-size:14px; line-height:1.6; }
+#setMenuDialog input[type=checkbox] { width:24px; height:24px; flex-shrink:0; accent-color:var(--accent); }
+.menu-filters { display:flex; gap:8px; margin:12px 0; }
+.menu-filters select { min-width:0; flex:1; }
+.menu-choice { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:16px 4px; border-bottom:1px solid var(--line); min-height:64px; }
+.menu-choice small { display:block; color:var(--dim); margin-top:5px; }
+.menu-choice span { overflow-wrap:anywhere; min-width:0; }
+.menu-footer { display:grid; gap:8px; padding:12px 16px max(12px, env(safe-area-inset-bottom)); border-top:1px solid var(--line); flex-shrink:0; }
+.menu-footer .btn:first-child { background:var(--volt); color:var(--ink); }
+.menu-empty { padding:30px 4px; color:var(--dim); line-height:1.8; }
+#setMenuError { color:var(--danger, #ff8484); margin:0; padding:0 16px 10px; font-size:14px; }
+#setMenuError:empty { display:none; }
+#setMenuDialog button:disabled { opacity:.4; }
+
+#setMenuDialog .menu-actions .btn { width: auto; background: var(--panel2); color: var(--text); }
+#setMenuBack[hidden], #setMenuDone[hidden] { display: none; }

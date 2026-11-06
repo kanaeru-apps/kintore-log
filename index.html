@@ -44,6 +44,7 @@
       <div id="entries"></div>
 
       <button id="addExerciseBtn" class="btn primary">＋ 種目を追加</button>
+      <button id="addSetMenuBtn" class="btn menu-outline">＋ セットメニューを追加</button>
       <textarea id="dayMemo" class="memo" rows="2" maxlength="5000" placeholder="メモ（自由記載）"></textarea>
     </section>
 
@@ -355,6 +356,13 @@
     </button>
   </nav>
 
+  <dialog id="setMenuDialog" aria-labelledby="setMenuTitle">
+    <div class="menu-head"><button type="button" id="setMenuBack" class="icon-btn" aria-label="戻る">‹</button><h3 id="setMenuTitle">セットメニュー</h3><button type="button" id="setMenuDone" class="icon-btn" hidden>完了</button><button type="button" id="setMenuClose" class="icon-btn" aria-label="閉じる">✕</button></div>
+    <div id="setMenuBody" class="menu-body"></div>
+    <div id="setMenuFooter" class="menu-footer"></div>
+    <p id="setMenuError" role="alert"></p>
+  </dialog>
+
   <!-- 種目選択シート -->
   <div id="backdrop"></div>
   <div id="sheet" role="dialog" aria-label="種目を選択">
@@ -556,6 +564,7 @@
 
 <div id="numberInputBar" hidden><span id="numberInputLabel"></span><button id="numberInputDone" type="button">完了</button></div>
 <script src="js/db.js?v=0.14.1"></script>
+<script src="js/set-menus.js?v=1"></script>
 <script src="js/app.js?v=0.14.1-b4-rm-button"></script>
 <script src="js/charts.js?v=0.14.1"></script>
 <script src="js/register-sw.js?v=0.14.1"></script>

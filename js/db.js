@@ -195,6 +195,38 @@ var DB = (function () {
     }
   }
 
+  /* Set menus live in the same state as workouts, including native JSON backups.
+     Commit once and roll back memory on storage failure. */
+  function commitMenus(change) {
+    var before = JSON.stringify(state);
+    try {
+      var result = change();
+      localStorage.setItem(KEY, JSON.stringify(state));
+      return result;
+    } catch (error) { state = JSON.parse(before); throw error; }
+  }
+  function cloneMenu(value) { return JSON.parse(JSON.stringify(value)); }
+  function menuEntries(entries, includeValues) {
+    if (!Array.isArray(entries) || !entries.length || entries.length > 100) throw new Error('種目は1〜100件で登録してください');
+    return entries.map(function (item) {
+      if (!item || !item.name || PARTS.indexOf(item.part) < 0) throw new Error('種目を選び直してください');
+      var count = Number(item.count == null ? (item.sets || []).length : item.count);
+      if (!Number.isInteger(count) || count < 1 || count > 100) throw new Error('セット数は1〜100で入力してください');
+      var entry = { exId: String(item.exId || item.id || ''), name: String(item.name).slice(0, 200), part: item.part, equip: String(item.equip || ''), sets: [] };
+      if (entry.part === CORE_PART) { entry.coreMode = coreConfig(item).mode; entry.coreSide = false; }
+      for (var i = 0; i < count; i++) {
+        var set = emptySet(entry.part);
+        Object.keys(set).forEach(function (key) {
+          var v = includeValues && item.sets && item.sets[i] ? item.sets[i][key] : '';
+          if (key === 'z') set[key] = ['hi', 'rec'].indexOf(v) >= 0 ? v : '';
+          else set[key] = v !== '' && v != null && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : '';
+        });
+        entry.sets.push(set);
+      }
+      return entry;
+    });
+  }
+
   function datesWithData() {
     return Object.keys(state.workouts).filter(function (d) {
       var w = state.workouts[d];
@@ -492,6 +524,45 @@ var DB = (function () {
       if (ex) markExerciseDeleted(ex.part, ex.name, ex.equip);
       markExercisesDirty();
       save();
+    },
+
+    /* ---- 保存済みセットメニュー ---- */
+    getMenus: function () { return cloneMenu(Array.isArray(state.menus) ? state.menus : []); },
+    saveMenu: function (id, name, entries, includeValues) {
+      name = String(name || '').trim();
+      if (!name || name.length > 60) throw new Error('メニュー名を1〜60文字で入力してください');
+      var clean = menuEntries(entries, includeValues);
+      return commitMenus(function () {
+        if (!Array.isArray(state.menus)) state.menus = [];
+        var index = state.menus.findIndex(function (m) { return m.id === id; });
+        if (id && index < 0) throw new Error('メニューが見つかりません');
+        var menu = { id: id || uid(), name: name, entries: clean, includeValues: !!includeValues };
+        if (index < 0) state.menus.push(menu); else state.menus[index] = menu;
+        return menu.id;
+      });
+    },
+    deleteMenu: function (id) {
+      return commitMenus(function () { state.menus = (state.menus || []).filter(function (m) { return m.id !== id; }); });
+    },
+    appendMenu: function (date, id) {
+      var menu = (state.menus || []).find(function (m) { return m.id === id; });
+      if (!menu) throw new Error('メニューが見つかりません');
+      var entries = menuEntries(menu.entries, menu.includeValues);
+      return commitMenus(function () {
+        var w = ensure(date);
+        entries.forEach(function (entry) {
+          var ex = getExercise(entry.exId);
+          if (!ex) {
+            ex = resolveExercise(entry.name, entry.part, entry.equip);
+            if (entry.part === CORE_PART) { ex.coreMode = entry.coreMode; ex.coreSide = false; }
+          }
+          entry.exId = ex.id;
+          entry.id = uid();
+          w.entries.push(entry);
+        });
+        markDirty(date);
+        return entries.length;
+      });
     },
 
     /* ---- ワークアウト ---- */
