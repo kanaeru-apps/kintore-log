@@ -2253,3 +2253,9 @@ body.number-editing #tabbar { visibility: hidden; }
 .program-order { display: flex; flex-direction: column; }
 #setMenuDialog .program-order .program-icon { font-size: 10px; }
 @media (max-width: 360px) { #setMenuDialog .menu-card { padding: 12px; } .menu-body { padding: 12px; } .program-exercise { gap: 2px; } }
+
+/* Shared record deletion affordance; retain a 44px touch target. */
+.trash-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 10px; color: var(--dim); background: transparent; border: 0; border-radius: 10px; }
+.trash-button svg { width: 20px; height: 20px; pointer-events: none; }
+.trash-button:active { color: var(--danger); background: var(--panel2); }
+.trash-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

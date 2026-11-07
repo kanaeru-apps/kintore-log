@@ -1424,11 +1424,15 @@
     return isCore(e) ? coreEntryHtml(e, i) : isCardio(e) ? cardioEntryHtml(e, i) : strengthEntryHtml(e, i);
   }
 
+  function trashIcon() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h16M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14M10 10v7M14 10v7"/></svg>';
+  }
+
   /* カード見出し（部位チップ・種目名・削除ボタン）は共通 */
   function entryHead(e) {
     return '<div class="entry-head">' + partChip(e.part) +
       '<h3 data-action="ex-info">' + esc(e.name) + equipTag(e.equip) + '<span class="info-hint">ⓘ</span></h3>' +
-      '<button class="link danger" data-action="del-entry">削除</button></div>';
+      '<button class="trash-button" type="button" data-action="del-entry" aria-label="' + esc(e.name) + 'の記録を削除" title="記録を削除">' + trashIcon() + '</button></div>';
   }
 
   /* 前回記録の参考表示（部位で表示内容を変える） */
@@ -2225,7 +2229,7 @@
       (w.memo ? '<p class="h-memo">' + esc(w.memo) + '</p>' : '') +
       '<div class="h-actions">' +
         '<button class="link" data-action="open-day">詳細確認</button>' +
-        '<button class="link danger" data-action="del-day">記録削除</button>' +
+        '<button class="trash-button" type="button" data-action="del-day" aria-label="この日の記録を削除" title="この日の記録を削除">' + trashIcon() + '</button>' +
       '</div>' +
     '</div>';
   }
