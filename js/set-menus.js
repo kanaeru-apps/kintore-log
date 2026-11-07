@@ -107,9 +107,21 @@ var SetMenus = (function () {
   function sizeDialog() {
     if (!dialog || !dialog.open) return;
     var v=window.visualViewport;
-    var height = Math.min(v ? v.height : window.innerHeight, window.innerHeight - keyboardHeight);
+    var top = v ? v.offsetTop : 0;
+    var bottom = Math.min(v ? top + v.height : window.innerHeight, window.innerHeight - keyboardHeight);
+    var height = Math.max(0, bottom - top);
     dialog.style.height='calc(' + Math.max(180, height-(editingInput ? 10 : 20)) + 'px - env(safe-area-inset-top, 0px)' + (editingInput ? ')' : ' - env(safe-area-inset-bottom, 0px))');
     dialog.style.top='calc(' + ((v ? v.offsetTop : 0)+10) + 'px + env(safe-area-inset-top, 0px))';
+    if (editingInput) {
+      // Measure after resizing; scroll only the program body, never the daily log.
+      var bounds = body.getBoundingClientRect();
+      var field = editingInput.getBoundingClientRect();
+      var visibleTop = Math.max(bounds.top, top) + 12;
+      var visibleBottom = Math.min(bounds.bottom, bottom, $('setMenuInputBar').getBoundingClientRect().top) - 12;
+      if (field.top < visibleTop || field.bottom > visibleBottom) {
+        body.scrollTop += field.top - (visibleTop + Math.max(0, (visibleBottom - visibleTop - field.height) / 2));
+      }
+    }
   }
   function init(opts) {
     options=opts; dialog=$('setMenuDialog');body=$('setMenuBody');footer=$('setMenuFooter');
@@ -151,11 +163,16 @@ var SetMenus = (function () {
       if(t.dataset.ex){if(t.checked)selection.push(t.dataset.ex);else selection=selection.filter(function(id){return id!==t.dataset.ex;});choices();}
     });
     window.addEventListener('resize',sizeDialog);
-    if(window.visualViewport)window.visualViewport.addEventListener('resize',sizeDialog);
+    if(window.visualViewport) {
+      window.visualViewport.addEventListener('resize',sizeDialog);
+      window.visualViewport.addEventListener('scroll',sizeDialog);
+    }
     var keyboard=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Keyboard;
     if(keyboard) {
       keyboard.addListener('keyboardWillShow',function(info){keyboardHeight=info.keyboardHeight || 0; sizeDialog();});
+      keyboard.addListener('keyboardDidShow',function(info){keyboardHeight=info.keyboardHeight || 0; sizeDialog();});
       keyboard.addListener('keyboardWillHide',function(){keyboardHeight=0;sizeDialog();});
+      keyboard.addListener('keyboardDidHide',function(){keyboardHeight=0;sizeDialog();});
     }
   }
   return {init:init};

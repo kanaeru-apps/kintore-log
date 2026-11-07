@@ -29,7 +29,9 @@ console.log('PASS: menu save/load, isolated edits, append preservation, restore,
 const elements=new Map();
 function element(id){if(!elements.has(id))elements.set(id,{id,innerHTML:'',textContent:'',style:{},classList:{add(){},remove(){},toggle(){}},handlers:{},dataset:{},addEventListener(name,fn){this.handlers[name]=fn;},focus(){},showModal(){this.open=true;},close(){this.open=false;}});return elements.get(id);}
 const dialog=element('setMenuDialog');let confirmed=true, notices=[];
-const uiContext={DB:db,console,document:{getElementById:element},window:{innerHeight:800,addEventListener(){}},confirm:()=>confirmed,setTimeout};
+const viewportEvents={},keyboardEvents={};
+const viewport={height:800,offsetTop:0,addEventListener:(name,fn)=>viewportEvents[name]=fn};
+const uiContext={DB:db,console,document:{getElementById:element},window:{innerHeight:800,visualViewport:viewport,Capacitor:{Plugins:{Keyboard:{addListener:(name,fn)=>keyboardEvents[name]=fn}}},addEventListener(){}},confirm:()=>confirmed,setTimeout};
 vm.createContext(uiContext);vm.runInContext(fs.readFileSync('js/set-menus.js','utf8'),uiContext);
 uiContext.SetMenus.init({date:()=> '2026-11-08',changed:()=>{},notify:m=>notices.push(m)});
 function click(action,extra={}){dialog.handlers.click({target:{closest:selector=>selector==='[data-menu-action]'?({dataset:{menuAction:action,...extra}}):null}});}
@@ -57,6 +59,12 @@ assert.deepEqual(highlights,[false,true]);assert.equal(db.exportStateJSON(),befo
 // Editing has a keyboard-adjacent Done action and cancellation restores the draft.
 let blurCount=0;
 const field={id:'menuName',value:'original',dataset:{},matches:()=>true,getAttribute:()=>null,blur:()=>blurCount++,dispatchEvent:()=>dialog.handlers.input({target:field})};
+const menuBody=element('setMenuBody');
+menuBody.scrollTop=0;
+let bodyBottom=700,fieldTop=180;
+menuBody.getBoundingClientRect=()=>({top:140,bottom:bodyBottom});
+element('setMenuInputBar').getBoundingClientRect=()=>({top:bodyBottom});
+field.getBoundingClientRect=()=>({top:fieldTop-menuBody.scrollTop,bottom:fieldTop-menuBody.scrollTop+52,height:52});
 uiContext.Event=function(){};
 element('addSetMenuBtn').onclick();click('new');
 dialog.handlers.focusin({target:field});assert.equal(element('setMenuInputBar').hidden,false);
@@ -64,3 +72,22 @@ field.value='changed';input('menuName',field.value);element('setMenuInputCancel'
 assert.equal(field.value,'original');assert.equal(element('setMenuInputBar').hidden,true);
 dialog.handlers.focusin({target:field});element('setMenuDone').onclick();assert.equal(element('setMenuInputBar').hidden,true);assert.equal(blurCount,2);
 console.log('PASS: new-program options hidden, selection isolated, keyboard Done and cancel');
+
+// Native resize:none leaves the viewport unchanged while the keyboard covers the lower field.
+fieldTop=620;menuBody.scrollTop=0;bodyBottom=700;
+dialog.handlers.focusin({target:field});assert.equal(menuBody.scrollTop,0);
+bodyBottom=420;keyboardEvents.keyboardWillShow({keyboardHeight:320});
+function assertFieldVisible(){const rect=field.getBoundingClientRect();assert(rect.top>=152);assert(rect.bottom<=bodyBottom-12);}
+assertFieldVisible();assert.match(dialog.style.height,/470px/);
+// A late layout change at animation completion must also be corrected.
+menuBody.scrollTop=0;keyboardEvents.keyboardDidShow({keyboardHeight:320});assertFieldVisible();
+const settled=menuBody.scrollTop;keyboardEvents.keyboardDidShow({keyboardHeight:320});assert.equal(menuBody.scrollTop,settled);
+// Browser keyboard and viewport panning follow the same visibility rule.
+keyboardEvents.keyboardDidHide();viewport.height=440;bodyBottom=380;menuBody.scrollTop=0;
+viewportEvents.resize();assertFieldVisible();
+viewport.offsetTop=30;menuBody.scrollTop=0;viewportEvents.scroll();assertFieldVisible();assert.match(dialog.style.top,/40px/);
+// Switching to an earlier input scrolls upwards; Done stops further auto-scrolling.
+fieldTop=180;dialog.handlers.focusin({target:field});assertFieldVisible();
+element('setMenuDone').onclick();const finished=menuBody.scrollTop;
+fieldTop=900;viewportEvents.resize();assert.equal(menuBody.scrollTop,finished);
+console.log('PASS: program input visibility for native keyboard, viewport resize/pan, field switching and Done');
