@@ -2213,7 +2213,10 @@ body.number-editing #tabbar { visibility: hidden; }
 .menu-label { display:block; margin-bottom:8px; }
 #setMenuDialog .menu-count { width:72px; padding:8px; }
 .menu-check { display:flex; align-items:center; gap:12px; margin-top:20px; font-size:14px; line-height:1.6; }
-#setMenuDialog input[type=checkbox] { width:24px; height:24px; flex-shrink:0; accent-color:var(--accent); }
+#setMenuDialog input[type=checkbox] { appearance:none; -webkit-appearance:none; width:24px; height:24px; flex-shrink:0; margin:0; border:1px solid var(--dim); border-radius:7px; background-color:#fff; opacity:1; }
+#setMenuDialog input[type=checkbox]:checked { border-color:var(--accent); background-color:var(--accent); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6 12 4 4 8-10' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-size:100% 100%; background-repeat:no-repeat; }
+#setMenuDialog input[type=checkbox]:disabled { opacity:1; }
+#setMenuDialog input[type=checkbox]:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .menu-filters { display:flex; gap:8px; margin:12px 0; }
 .menu-filters select { min-width:0; flex:1; }
 .menu-choice { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:16px 4px; border-bottom:1px solid var(--line); min-height:64px; }
