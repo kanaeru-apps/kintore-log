@@ -530,12 +530,12 @@ var DB = (function () {
     getMenus: function () { return cloneMenu(Array.isArray(state.menus) ? state.menus : []); },
     saveMenu: function (id, name, entries, includeValues) {
       name = String(name || '').trim();
-      if (!name || name.length > 60) throw new Error('メニュー名を1〜60文字で入力してください');
+      if (!name || name.length > 60) throw new Error('プログラム名を1〜60文字で入力してください');
       var clean = menuEntries(entries, includeValues);
       return commitMenus(function () {
         if (!Array.isArray(state.menus)) state.menus = [];
         var index = state.menus.findIndex(function (m) { return m.id === id; });
-        if (id && index < 0) throw new Error('メニューが見つかりません');
+        if (id && index < 0) throw new Error('プログラムが見つかりません');
         var menu = { id: id || uid(), name: name, entries: clean, includeValues: !!includeValues };
         if (index < 0) state.menus.push(menu); else state.menus[index] = menu;
         return menu.id;
@@ -546,7 +546,7 @@ var DB = (function () {
     },
     appendMenu: function (date, id) {
       var menu = (state.menus || []).find(function (m) { return m.id === id; });
-      if (!menu) throw new Error('メニューが見つかりません');
+      if (!menu) throw new Error('プログラムが見つかりません');
       var entries = menuEntries(menu.entries, menu.includeValues);
       return commitMenus(function () {
         var w = ensure(date);
