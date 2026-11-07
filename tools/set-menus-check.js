@@ -27,15 +27,15 @@ console.log('PASS: menu save/load, isolated edits, append preservation, restore,
 
 // Exercise UI event wiring against the actual DB, without browser or device claims.
 const elements=new Map();
-function element(id){if(!elements.has(id))elements.set(id,{id,innerHTML:'',textContent:'',style:{},handlers:{},dataset:{},addEventListener(name,fn){this.handlers[name]=fn;},focus(){},showModal(){this.open=true;},close(){this.open=false;}});return elements.get(id);}
+function element(id){if(!elements.has(id))elements.set(id,{id,innerHTML:'',textContent:'',style:{},classList:{add(){},remove(){},toggle(){}},handlers:{},dataset:{},addEventListener(name,fn){this.handlers[name]=fn;},focus(){},showModal(){this.open=true;},close(){this.open=false;}});return elements.get(id);}
 const dialog=element('setMenuDialog');let confirmed=true, notices=[];
 const uiContext={DB:db,console,document:{getElementById:element},window:{innerHeight:800,addEventListener(){}},confirm:()=>confirmed,setTimeout};
 vm.createContext(uiContext);vm.runInContext(fs.readFileSync('js/set-menus.js','utf8'),uiContext);
 uiContext.SetMenus.init({date:()=> '2026-11-08',changed:()=>{},notify:m=>notices.push(m)});
-function click(action,extra={}){dialog.handlers.click({target:{closest:()=>({dataset:{menuAction:action,...extra}})}});}
+function click(action,extra={}){dialog.handlers.click({target:{closest:selector=>selector==='[data-menu-action]'?({dataset:{menuAction:action,...extra}}):null}});}
 function input(id,value,dataset={}){dialog.handlers.input({target:{id,value,dataset}});}
 function toggle(id){dialog.handlers.change({target:{dataset:{ex:id},checked:true}});}
-element('addSetMenuBtn').onclick();click('new');input('menuName','UI menu');click('pick');
+element('addSetMenuBtn').onclick();click('new');assert.doesNotMatch(element('setMenuBody').innerHTML,/menuValues/);input('menuName','UI menu');click('pick');
 const picks=db.getExercises().slice(0,2);picks.forEach(e=>toggle(e.id));click('selected');
 assert.match(element('setMenuBody').innerHTML,/value="3"/);
 input('', '4', {count:'0'});click('down',{index:'0'});click('save');
@@ -46,3 +46,21 @@ click('apply',{id:uiMenu.id});assert.equal(db.getWorkout('2026-11-08').entries.l
 element('addSetMenuBtn').onclick();click('edit',{id:uiMenu.id});input('menuName','discard this');confirmed=false;element('setMenuClose').onclick();assert(dialog.open);confirmed=true;element('setMenuClose').onclick();assert.equal(db.getMenus().find(m=>m.id===uiMenu.id).name,'UI menu');
 element('addSetMenuBtn').onclick();click('today');input('menuName','snapshot');click('save');assert(db.getMenus().find(m=>m.name==='snapshot'));
 console.log('PASS: menu UI new/pick/reorder/count/save/apply/day snapshot and discard confirmation');
+
+// Program selection only changes the highlight; it never adds a workout.
+const highlights=[false,false];
+const cards=highlights.map((_,i)=>({classList:{toggle:(_,v)=>{highlights[i]=v;}}}));
+element('setMenuBody').querySelectorAll=()=>cards;
+const beforeSelection=db.exportStateJSON();
+dialog.handlers.click({target:{closest:s=>s==='[data-program-id]'?cards[1]:null}});
+assert.deepEqual(highlights,[false,true]);assert.equal(db.exportStateJSON(),beforeSelection);
+// Editing has a keyboard-adjacent Done action and cancellation restores the draft.
+let blurCount=0;
+const field={id:'menuName',value:'original',dataset:{},matches:()=>true,getAttribute:()=>null,blur:()=>blurCount++,dispatchEvent:()=>dialog.handlers.input({target:field})};
+uiContext.Event=function(){};
+element('addSetMenuBtn').onclick();click('new');
+dialog.handlers.focusin({target:field});assert.equal(element('setMenuInputBar').hidden,false);
+field.value='changed';input('menuName',field.value);element('setMenuInputCancel').onclick();
+assert.equal(field.value,'original');assert.equal(element('setMenuInputBar').hidden,true);
+dialog.handlers.focusin({target:field});element('setMenuDone').onclick();assert.equal(element('setMenuInputBar').hidden,true);assert.equal(blurCount,2);
+console.log('PASS: new-program options hidden, selection isolated, keyboard Done and cancel');

@@ -1,13 +1,14 @@
 /* Saved workout menus: drafts never mutate the daily log or stored menus. */
 'use strict';
 var SetMenus = (function () {
-  var options, dialog, body, footer, draft, screen, selection, search = '', part = '', equip = '', changed = false, date, keyboardHeight = 0;
+  var options, dialog, body, footer, draft, screen, selection, search = '', part = '', equip = '', changed = false, date, keyboardHeight = 0, editingInput = null, initialInputValue = '';
   function $(id) { return document.getElementById(id); }
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function clone(v) { return JSON.parse(JSON.stringify(v)); }
   function button(action, label, extra) { return '<button type="button" class="btn small" data-menu-action="' + action + '" ' + (extra || '') + '>' + label + '</button>'; }
   function iconButton(action, label, extra) {
     var paths = {
+      delete: '<path d="M4 6h16M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14M10 10v7M14 10v7"/>',
       edit: '<path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/>',
       copy: '<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'
     };
@@ -19,17 +20,17 @@ var SetMenus = (function () {
     return '<div class="program-meta"><span class="chip p-' + (parts[e.part] || 'etc') + '">' + esc(e.part) + '</span>' + (e.equip ? '<span class="program-equip">' + esc(e.equip) + '</span>' : '') + '</div>';
   }
   function error(message) { $('setMenuError').textContent = message || ''; }
-  function header(title, back) { $('setMenuTitle').textContent = title; $('setMenuBack').hidden = !back; error(); body.scrollTop = 0; }
+  function header(title, back) { endInput(false); $('setMenuTitle').textContent = title; $('setMenuBack').hidden = !back; error(); body.scrollTop = 0; }
   function close() {
     if (changed && !confirm('編集中の内容を保存せずに閉じますか？')) return;
-    dialog.close(); changed = false; $('addSetMenuBtn').focus();
+    endInput(false); dialog.close(); changed = false; $('addSetMenuBtn').focus();
   }
   function list() {
     screen = 'list'; changed = false; header('プログラムメニュー', false);
     var menus = DB.getMenus();
     body.innerHTML = '<p class="menu-hint">よく使う種目の組み合わせをまとめて追加</p>' + (menus.length ? menus.map(function (m) {
       var data = 'data-id="' + esc(m.id) + '"';
-      return '<article class="menu-card program-summary"><div class="program-card-head"><h4>' + esc(m.name) + '</h4>' + iconButton('delete', m.name + 'を削除', data) + '</div><p class="menu-hint">' + m.entries.length + '種目 · ' + esc(m.entries.map(function (e) { return e.name; }).join('／')) + '</p><div class="menu-actions program-list-actions">' + button('apply','追加',data) + '<div class="program-tools">' + iconButton('edit',m.name + 'を編集',data) + iconButton('copy',m.name + 'を複製',data) + '</div></div></article>';
+      return '<article class="menu-card program-summary" tabindex="0" data-program-id="' + esc(m.id) + '" aria-label="' + esc(m.name) + '"><div class="program-card-head"><h4>' + esc(m.name) + '</h4></div><p class="menu-hint">' + m.entries.length + '種目 · ' + esc(m.entries.map(function (e) { return e.name; }).join('／')) + '</p><div class="menu-actions program-list-actions">' + button('apply','追加',data) + '<div class="program-tools">' + iconButton('edit',m.name + 'を編集',data) + iconButton('copy',m.name + 'を複製',data) + iconButton('delete',m.name + 'を削除',data) + '</div></div></article>';
     }).join('') : '<div class="menu-empty">保存したプログラムはまだありません。<br>好きな種目を組み合わせて作成できます。</div>');
     footer.innerHTML = button('new','＋ プログラムを作成') + button('today','この日の種目から保存');
   }
@@ -37,12 +38,12 @@ var SetMenus = (function () {
     draft = clone(menu); draft.entries.forEach(function (e) { e.count = Math.max(1, e.sets.length); }); renderEditor();
   }
   function renderEditor() {
-    screen = 'edit'; header(draft.id ? 'プログラムを編集' : 'プログラムを作成', true);
+    screen = 'edit'; header(draft.id ? 'プログラムの編集' : 'プログラムを作成', true);
     body.innerHTML = '<label class="menu-label" for="menuName">プログラム名</label><input id="menuName" maxlength="60" placeholder="例：胸の日、自宅トレ" value="' + esc(draft.name) + '">' +
       '<p class="menu-hint">種目の順番とセット数を決めて保存します。</p><div>' + draft.entries.map(function (e,i) {
         var data = 'data-index="' + i + '"';
         return '<article class="menu-card program-exercise"><div class="program-exercise-content"><h4>' + esc(e.name) + '</h4>' + exerciseMeta(e) + '<label class="program-set-count">セット数 <input class="menu-count" type="number" inputmode="numeric" min="1" max="100" aria-label="' + esc(e.name) + 'のセット数" data-count="' + i + '" value="' + esc(e.count) + '"></label></div><div class="program-exercise-tools"><div class="program-order">' + iconButton('up',e.name + 'を上へ',data + (i===0?' disabled':'')) + iconButton('down',e.name + 'を下へ',data + (i===draft.entries.length-1?' disabled':'')) + '</div>' + iconButton('remove',e.name + 'をプログラムから外す',data) + '</div></article>';
-      }).join('') + '</div>' + button('pick','＋ 種目を選ぶ') + '<label class="menu-check"><input id="menuValues" type="checkbox" '+(draft.includeValues?'checked':'')+'>保存元の重量・回数・時間なども含める</label><p class="menu-hint">チェックなしの場合、呼び出した種目の数値は空欄になります。新しく選んだ種目も空欄です。</p>';
+      }).join('') + '</div>' + button('pick','＋ 種目を選ぶ') + ((draft.id || draft.fromDay) ? '<label class="menu-check"><input id="menuValues" type="checkbox" '+(draft.includeValues?'checked':'')+'>保存元の重量・回数・時間なども含める</label><p class="menu-hint">チェックなしの場合、呼び出した種目の数値は空欄になります。新しく選んだ種目も空欄です。</p>' : '');
     footer.innerHTML = button('save','プログラムを保存');
   }
   function picker() {
@@ -65,7 +66,7 @@ var SetMenus = (function () {
     if (a==='today') {
       var w=DB.getWorkout(date);
       if (!w || !w.entries.length) return error('この日には種目がありません');
-      changed=true; edit({name:'',entries:clone(w.entries),includeValues:false});
+      changed=true; edit({name:'',entries:clone(w.entries),includeValues:false,fromDay:true});
     }
     if (['edit','copy','delete','apply'].indexOf(a)>=0) {
       menus=DB.getMenus(); m=menus.find(function(x){return x.id===id;});
@@ -89,29 +90,54 @@ var SetMenus = (function () {
     if (a==='remove') {draft.entries.splice(i,1);changed=true;renderEditor();}
     if (a==='save') { DB.saveMenu(draft.id,draft.name,draft.entries,draft.includeValues); options.changed(); list(); options.notify('プログラムを保存しました'); }
   }
+  function selectProgram(card) {
+    body.querySelectorAll('[data-program-id]').forEach(function(item) { item.classList.toggle('program-selected', item === card); });
+  }
+  function endInput(cancel) {
+    var input=editingInput;
+    editingInput=null;
+    if (input) {
+      if (cancel) { input.value=initialInputValue; input.dispatchEvent(new Event('input', {bubbles:true})); }
+      input.blur();
+    }
+    $('setMenuInputBar').hidden=true;
+    dialog.classList.remove('program-input-active');
+    sizeDialog();
+  }
   function sizeDialog() {
     if (!dialog || !dialog.open) return;
     var v=window.visualViewport;
     var height = Math.min(v ? v.height : window.innerHeight, window.innerHeight - keyboardHeight);
-    dialog.style.height='calc(' + Math.max(180, height-20) + 'px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))';
+    dialog.style.height='calc(' + Math.max(180, height-(editingInput ? 10 : 20)) + 'px - env(safe-area-inset-top, 0px)' + (editingInput ? ')' : ' - env(safe-area-inset-bottom, 0px))');
     dialog.style.top='calc(' + ((v ? v.offsetTop : 0)+10) + 'px + env(safe-area-inset-top, 0px))';
   }
   function init(opts) {
     options=opts; dialog=$('setMenuDialog');body=$('setMenuBody');footer=$('setMenuFooter');
-    $('addSetMenuBtn').onclick=function(){date=options.date();list();dialog.showModal();sizeDialog();};
+    $('addSetMenuBtn').onclick=function(){date=options.date();list();dialog.showModal();$('setMenuTitle').focus();sizeDialog();};
     $('setMenuClose').onclick=close;
-    var focusedInput = null;
     dialog.addEventListener('focusin', function(e) {
-      if (e.target.matches('input:not([type=checkbox])')) { focusedInput=e.target; $('setMenuDone').hidden=false; }
+      if (e.target.matches('input:not([type=checkbox])')) {
+        editingInput=e.target; initialInputValue=e.target.value;
+        $('setMenuInputBar').hidden=false; dialog.classList.add('program-input-active');
+        $('setMenuInputLabel').textContent=e.target.getAttribute('aria-label') || (e.target.id==='menuName' ? 'プログラム名' : '種目を検索');
+        sizeDialog();
+      }
     });
     dialog.addEventListener('focusout', function() {
-      setTimeout(function() { if (!dialog.contains(document.activeElement) || !document.activeElement.matches('input:not([type=checkbox]), #setMenuDone')) $('setMenuDone').hidden=true; }, 0);
+      setTimeout(function() {
+        var active=document.activeElement;
+        if (!dialog.contains(active) || !active.matches('input:not([type=checkbox]), #setMenuInputBar button')) endInput(false);
+      }, 0);
     });
-    $('setMenuDone').onclick=function() { if(focusedInput) focusedInput.blur(); $('setMenuDone').hidden=true; $('setMenuClose').focus(); };
-    dialog.addEventListener('keydown', function(e) { if (e.key==='Enter' && e.target.matches('input:not([type=checkbox])')) { e.preventDefault(); e.target.blur(); $('setMenuClose').focus(); } });
+    $('setMenuDone').onclick=function() { endInput(false); $('setMenuTitle').focus(); };
+    $('setMenuInputCancel').onclick=function() { endInput(true); $('setMenuTitle').focus(); };
+    dialog.addEventListener('keydown', function(e) {
+      if (e.key==='Enter' && e.target.matches('input:not([type=checkbox])')) { e.preventDefault(); endInput(false); $('setMenuTitle').focus(); }
+      if ((e.key==='Enter' || e.key===' ') && e.target.matches('[data-program-id]')) { e.preventDefault(); selectProgram(e.target); }
+    });
     $('setMenuBack').onclick=function(){if(screen==='pick')renderEditor();else if(!changed || confirm('編集中の内容を破棄して戻りますか？'))list();};
     dialog.addEventListener('cancel',function(e){e.preventDefault();close();});
-    dialog.addEventListener('click',function(e){var b=e.target.closest('[data-menu-action]');if(b)try{act(b);}catch(err){error(err.message || '保存できませんでした。空き容量を確認してください');}});
+    dialog.addEventListener('click',function(e){var b=e.target.closest('[data-menu-action]'); var card=e.target.closest('[data-program-id]'); if(card && (!b || b.dataset.menuAction==='apply')) selectProgram(card); if(b)try{act(b);}catch(err){error(err.message || '保存できませんでした。空き容量を確認してください');}});
     dialog.addEventListener('input',function(e){
       var t=e.target;
       if(t.id==='menuName'){draft.name=t.value;changed=true;}
