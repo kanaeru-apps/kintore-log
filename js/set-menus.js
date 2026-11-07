@@ -32,7 +32,7 @@ var SetMenus = (function () {
       var data = 'data-id="' + esc(m.id) + '"';
       return '<article class="menu-card program-summary" tabindex="0" data-program-id="' + esc(m.id) + '" aria-label="' + esc(m.name) + '"><div class="program-card-head"><h4>' + esc(m.name) + '</h4></div><p class="menu-hint">' + m.entries.length + '種目 · ' + esc(m.entries.map(function (e) { return e.name; }).join('／')) + '</p><div class="menu-actions program-list-actions">' + button('apply','＋追加',data) + '<div class="program-tools">' + iconButton('edit',m.name + 'を編集',data) + iconButton('copy',m.name + 'を複製',data) + iconButton('delete',m.name + 'を削除',data) + '</div></div></article>';
     }).join('') : '<div class="menu-empty">保存したプログラムはまだありません。<br>好きな種目を組み合わせて作成できます。</div>');
-    footer.innerHTML = button('new','＋ プログラムを作成') + button('today','この日の種目から保存');
+    footer.innerHTML = button('new','＋ プログラムを作成') + button('today','＋ この日の種目から保存');
   }
   function edit(menu) {
     draft = clone(menu); draft.entries.forEach(function (e) { e.count = Math.max(1, e.sets.length); }); renderEditor();

@@ -2277,9 +2277,11 @@ body.number-editing #tabbar { visibility: hidden; }
 #setMenuDialog.program-input-active { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 #setMenuDialog.program-input-active #setMenuFooter { display: none; }
 
-/* Program footer secondary action matches the log page outline button. */
-#setMenuDialog .menu-footer [data-menu-action="today"] { width: 100%; border: 1px solid var(--accent); color: var(--accent); background: var(--panel); padding: 16px; font-size: 16px; font-weight: 800; }
-.program-section-title { margin: 22px 0 6px; font-size: 16px; font-weight: 700; }
+/* Program footer actions share dimensions and typography. */
+#setMenuDialog .menu-footer .btn { width: 100%; min-height: 44px; padding: 10px 16px; border: 1px solid transparent; font-size: 16px; font-weight: 800; line-height: 1.4; }
+#setMenuDialog .menu-footer [data-menu-action="today"] { border-color: var(--accent); color: var(--accent); background: var(--panel); }
+#setMenuDialog .menu-label, #setMenuDialog .program-section-title { color: var(--text); font-size: 16px; font-weight: 700; line-height: 1.5; }
+.program-section-title { margin: 22px 0 6px; }
 /* Keep spacing and accessible input names while removing keypad helper text. */
 #drumSheet.number-direct #drumTitle,
 #repsSheet.number-direct #repsTitle,
