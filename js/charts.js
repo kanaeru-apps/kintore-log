@@ -266,6 +266,20 @@ var Charts = (function () {
     return chartCard('ベスト記録 TOP3（合計ボリューム）', '<ol class="best-record-list">' + rows + '</ol>');
   }
 
+  /* 全期間の日別ベスト1RMを比較。直近12回のグラフとは独立したランキング。 */
+  function bestRmRecordCard(sessions) {
+    var records = sessions.filter(function (r) { return Number.isFinite(r.rm) && r.rm > 0; })
+      .sort(function (a, b) { return b.rm - a.rm || a.date.localeCompare(b.date); }).slice(0, 3);
+    var rows = MEDALS.map(function (medal, i) {
+      var r = records[i];
+      var d = r ? parseDate(r.date) : null;
+      return '<li class="br-row"><span class="br-medal">' + medal + '</span>' +
+        '<span class="br-date">' + (d ? (d.getMonth() + 1) + '/' + d.getDate() : '記録なし') + '</span>' +
+        '<span class="br-vol">' + (r ? fmt1(r.rm) + ' kg' : '—') + '</span></li>';
+    }).join('');
+    return chartCard('ベスト記録 TOP3（1RM）', '<ol class="best-record-list">' + rows + '</ol>');
+  }
+
   function renderExercisePane() {
     if (!state.exId) { $('#chartExBody').innerHTML = emptyMsg('種目を選択してください'); return; }
     var rows = collectExerciseSessions(state.exId);
@@ -288,8 +302,9 @@ var Charts = (function () {
       html += chartCard('距離の推移（km）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: r.d }; })));
     } else {
       html += bestRecordCard(state.exId);
-      html += chartCard('推定1RM推移（kg）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: Math.round(r.rm * 10) / 10 }; })));
+      html += bestRmRecordCard(rows);
       html += chartCard('セッション合計ボリューム（kg）', barChartSvg(recent.map(function (r) { return { label: labelOf(r), value: Math.round(r.vol) }; })));
+      html += chartCard('推定1RM推移（kg）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: Math.round(r.rm * 10) / 10 }; })));
     }
     $('#chartExBody').innerHTML = html;
   }
