@@ -1,5 +1,5 @@
 /* 筋トレLog Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v85-program-checkbox-colors';
+const CACHE = 'kintore-v86-program-description';
 const ASSETS = [
   './',
   './index.html',
