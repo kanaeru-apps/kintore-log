@@ -40,10 +40,10 @@ var SetMenus = (function () {
   function renderEditor() {
     screen = 'edit'; header(draft.id ? 'プログラムの編集' : 'プログラムを作成', true);
     body.innerHTML = '<label class="menu-label" for="menuName">プログラム名</label><input id="menuName" maxlength="60" placeholder="例：胸の日、自宅トレ" value="' + esc(draft.name) + '">' +
-      '<p class="menu-hint">種目の順番とセット数を決めて保存します。</p><div>' + draft.entries.map(function (e,i) {
+      '<h4 class="program-section-title">メニュー</h4><p class="menu-hint">種目の順番とセット数を決めて保存します。</p><div>' + draft.entries.map(function (e,i) {
         var data = 'data-index="' + i + '"';
         return '<article class="menu-card program-exercise"><div class="program-exercise-content"><h4>' + esc(e.name) + '</h4>' + exerciseMeta(e) + '<label class="program-set-count">セット数 <input class="menu-count" type="number" inputmode="numeric" min="1" max="100" aria-label="' + esc(e.name) + 'のセット数" data-count="' + i + '" value="' + esc(e.count) + '"></label></div><div class="program-exercise-tools"><div class="program-order">' + iconButton('up',e.name + 'を上へ',data + (i===0?' disabled':'')) + iconButton('down',e.name + 'を下へ',data + (i===draft.entries.length-1?' disabled':'')) + '</div>' + iconButton('remove',e.name + 'をプログラムから外す',data) + '</div></article>';
-      }).join('') + '</div>' + button('pick','＋ 種目を選ぶ') + ((draft.id || draft.fromDay) ? '<label class="menu-check"><input id="menuValues" type="checkbox" '+(draft.includeValues?'checked':'')+'>保存元の重量・回数・時間なども含める</label><p class="menu-hint">チェックなしの場合、呼び出した種目の数値は空欄になります。新しく選んだ種目も空欄です。</p>' : '');
+      }).join('') + '</div>' + button('pick','＋ 種目を選ぶ');
     footer.innerHTML = button('save','プログラムを保存');
   }
   function picker() {
@@ -146,7 +146,6 @@ var SetMenus = (function () {
     });
     dialog.addEventListener('change',function(e){
       var t=e.target;
-      if(t.id==='menuValues'){draft.includeValues=t.checked;changed=true;}
       if(t.id==='menuPart'){part=t.value;choices();}
       if(t.id==='menuEquip'){equip=t.value;choices();}
       if(t.dataset.ex){if(t.checked)selection.push(t.dataset.ex);else selection=selection.filter(function(id){return id!==t.dataset.ex;});choices();}
