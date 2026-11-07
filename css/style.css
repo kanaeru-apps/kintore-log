@@ -2242,7 +2242,7 @@ body.number-editing #tabbar { visibility: hidden; }
 #setMenuDialog .program-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #setMenuDialog .program-icon:disabled { opacity: .22; }
 .program-list-actions { justify-content: space-between; flex-wrap: nowrap; }
-#setMenuDialog .program-list-actions .btn { padding: 10px 26px; color: var(--accent); border: 1px solid var(--tint-line); background: var(--tint-1); }
+#setMenuDialog .program-list-actions .btn { display: inline-flex; align-items: center; justify-content: center; height: 44px; padding: 0 6px; font-size: 20px; line-height: 1; font-weight: 600; color: var(--accent); border: 0; background: transparent; }
 .program-summary .menu-hint { margin-top: 4px; }
 .program-exercise { display: flex; align-items: center; gap: 8px; }
 .program-exercise-content { flex: 1; min-width: 0; }
