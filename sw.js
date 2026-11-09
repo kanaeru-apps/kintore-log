@@ -1,5 +1,5 @@
 /* 筋トレLog Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v87-rm-best-records';
+const CACHE = 'kintore-v88-text-input-visibility';
 const ASSETS = [
   './',
   './index.html',
@@ -7,6 +7,7 @@ const ASSETS = [
   './js/theme-init.js',
   './js/db.js',
   './js/app.js',
+  './js/text-input.js',
   './js/set-menus.js',
   './js/charts.js',
   './js/register-sw.js',

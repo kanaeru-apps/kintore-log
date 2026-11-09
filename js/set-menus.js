@@ -12,6 +12,7 @@ var SetMenus = (function () {
       edit: '<path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/>',
       copy: '<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'
     };
+    paths.remove = paths.delete;
     var glyph = paths[action] ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[action] + '</svg>' : '<span aria-hidden="true">' + (action === 'up' ? '▲' : action === 'down' ? '▼' : '✕') + '</span>';
     return '<button type="button" class="program-icon' + (action === 'delete' || action === 'remove' ? ' set-del' : '') + '" data-menu-action="' + action + '" aria-label="' + esc(label) + '" title="' + esc(label) + '" ' + (extra || '') + '>' + glyph + '</button>';
   }

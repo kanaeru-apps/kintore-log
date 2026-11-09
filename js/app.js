@@ -2333,7 +2333,7 @@
         return '<div class="s-row" data-ex="' + x.id + '">' +
           '<div class="s-main" data-action="info-ex"><b>' + esc(x.name) + equipTag(x.equip) + '</b></div>' +
           '<button class="link" data-action="rename">名称変更</button>' +
-          '<button class="link danger" data-action="del-ex">削除</button>' +
+          '<button class="trash-button" type="button" data-action="del-ex" aria-label="' + esc(x.name) + 'を削除" title="種目を削除">' + trashIcon() + '</button>' +
         '</div>';
       }).join('') + '</div>' : '');
     }).join('');

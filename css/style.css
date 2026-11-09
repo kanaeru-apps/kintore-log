@@ -1179,6 +1179,21 @@ button { cursor: pointer; }
   padding-bottom: calc(12px + env(safe-area-inset-bottom));
 }
 #sheet.show { transform: translate(-50%, 0); }
+/* Give the entire add-exercise sheet a visible, scrollable keyboard viewport. */
+#sheet.show.text-input-active {
+  top: var(--text-sheet-top); bottom: auto;
+  height: var(--text-sheet-height); max-height: var(--text-sheet-height);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding-bottom: 12px;
+}
+#sheet.text-input-active .sheet-list { flex: 0 0 auto; max-height: 100px; }
+#sheet.text-input-active > * { flex-shrink: 0; }
+body.text-input-active { padding-bottom: var(--text-input-space, 0px); }
+#textInputBar { position: fixed; left: 50%; transform: translateX(-50%); width: min(100%, 560px); height: 56px; padding: 6px 16px; display: flex; justify-content: flex-end; align-items: center; z-index: 1200; background: var(--panel2); border-top: 1px solid var(--line); }
+#textInputBar[hidden] { display: none; }
+/* iOS must not zoom the page when an ordinary text field receives focus. */
+input[type="text"]:not([inputmode="numeric"]):not([inputmode="decimal"]),
+input[type="search"], input[type="url"], input[type="email"], textarea { font-size: 16px; }
 
 .grabber {
   width: 40px;
