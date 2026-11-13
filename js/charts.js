@@ -150,6 +150,26 @@ var Charts = (function () {
   var CW = 320, CH = 150, PL = 34, PR = 8, PT = 26, PB = 20;
   var IW = CW - PL - PR, IH = CH - PT - PB;
 
+  /* 日付は全点に詰め込まず、文字幅と余白を確保して表示する。
+     最初と最後を優先し、末尾だけ隣の日付と重なるケースも防ぐ。 */
+  function dateAxisLabels(points, xAt) {
+    var labels = points.map(function (p, i) {
+      var width = String(p.label).length * 6;
+      var x = Math.max(PL + width / 2, Math.min(CW - PR - width / 2, xAt(i)));
+      return { label: p.label, x: x, left: x - width / 2, right: x + width / 2 };
+    });
+    if (!labels.length) return '';
+    var selected = [labels[0]], last = labels[labels.length - 1];
+    for (var i = 1; i < labels.length - 1; i++) {
+      var candidate = labels[i];
+      if (candidate.left >= selected[selected.length - 1].right + 12 && candidate.right + 12 <= last.left) selected.push(candidate);
+    }
+    if (labels.length > 1) selected.push(last);
+    return selected.map(function (p) {
+      return '<text class="chart-axis-label chart-date-label" text-anchor="middle" x="' + p.x.toFixed(1) + '" y="' + (CH - 4) + '">' + esc(p.label) + '</text>';
+    }).join('');
+  }
+
   function gridAndAxis(maxV) {
     var lines = [0, 0.5, 1].map(function (t) {
       var y = PT + IH * (1 - t);
@@ -161,12 +181,33 @@ var Charts = (function () {
       '<line class="chart-axis-line" x1="' + PL + '" x2="' + (CW - PR) + '" y1="' + (PT + IH) + '" y2="' + (PT + IH) + '"/>';
   }
 
+  /* 縦軸を固定し、日付と記録を6回分ずつ横スクロールする。 */
+  function sessionChart(points, maxV, draw) {
+    var visible = Math.min(6, Math.max(1, points.length));
+    var slot = 276 / visible;
+    var width = slot * Math.max(1, points.length);
+    var xAt = function (i) { return slot * (i + 0.5); };
+    var axis = '', grid = '';
+    [0, 0.5, 1].forEach(function (t) {
+      var y = PT + IH * (1 - t);
+      axis += '<text class="chart-axis-label" x="0" y="' + (y + 3) + '">' + fmt1(maxV * t) + '</text>';
+      grid += '<line class="chart-gridline" x1="0" x2="' + width + '" y1="' + y + '" y2="' + y + '"/>';
+    });
+    var dates = points.map(function (p, i) {
+      return '<text class="chart-axis-label chart-date-label" text-anchor="middle" x="' + xAt(i).toFixed(1) + '" y="' + (CH - 4) + '">' + esc(p.label) + '</text>';
+    }).join('');
+    return '<div class="session-chart"><svg class="session-chart-axis" viewBox="0 0 44 150">' + axis + '</svg>' +
+      '<div class="session-chart-scroll" tabindex="0" role="region" aria-label="記録のグラフ。横スクロールで過去の記録を表示">' +
+      '<svg class="chart-svg" style="width:' + (Math.max(1, points.length) / visible * 100) + '%" viewBox="0 0 ' + width + ' ' + CH + '">' +
+      grid + draw(xAt, slot) + dates + '</svg></div></div>' +
+      (points.length > 6 ? '<div class="chart-scroll-hint">横スクロールで過去の記録を表示</div>' : '');
+  }
+
   /* 折れ線グラフ（points: [{label, value}]） */
   function lineChartSvg(points) {
     var n = points.length;
     var maxV = Math.max.apply(null, points.map(function (p) { return p.value; }).concat([0])) || 1;
-    var stepX = n > 1 ? IW / (n - 1) : 0;
-    var xAt = function (i) { return PL + (n > 1 ? i * stepX : IW / 2); };
+    return sessionChart(points, maxV, function (xAt) {
     var yAt = function (v) { return PT + IH - (v / maxV) * IH; };
 
     var path = points.map(function (p, i) {
@@ -179,40 +220,27 @@ var Charts = (function () {
       var y = Math.max(10, yAt(p.value) - 8);
       return '<text class="chart-value-label" text-anchor="middle" x="' + xAt(i).toFixed(1) + '" y="' + y.toFixed(1) + '">' + fmt1(p.value) + '</text>';
     }).join('');
-    var labelEvery = Math.max(1, Math.ceil(n / 6));
-    var xLabels = points.map(function (p, i) {
-      if (i % labelEvery !== 0 && i !== n - 1) return '';
-      return '<text class="chart-axis-label" text-anchor="middle" x="' + xAt(i).toFixed(1) + '" y="' + (CH - 4) + '">' + esc(p.label) + '</text>';
-    }).join('');
-
-    return '<svg class="chart-svg" viewBox="0 0 ' + CW + ' ' + CH + '" preserveAspectRatio="xMidYMid meet">' +
-      gridAndAxis(maxV) + '<path class="chart-line-path" d="' + path + '"/>' + dots + valueLabels + xLabels +
-    '</svg>';
+    return '<path class="chart-line-path" d="' + path + '"/>' + dots + valueLabels;
+    });
   }
 
   /* 単色の棒グラフ（points: [{label, value}]） */
   function barChartSvg(points) {
     var n = points.length;
     var maxV = Math.max.apply(null, points.map(function (p) { return p.value; }).concat([0])) || 1;
-    var slot = IW / n;
+    return sessionChart(points, maxV, function (xAt, slot) {
     var barW = Math.min(28, slot * 0.6);
     var fill = volt();   /* 棒ごとに getComputedStyle を呼ばないよう、描画の頭で1回だけ読む */
 
     var bars = points.map(function (p, i) {
       var h = (p.value / maxV) * IH;
-      var x = PL + slot * i + (slot - barW) / 2;
+      var x = xAt(i) - barW / 2;
       var y = PT + IH - h;
       var label = p.value > 0 ? '<text class="chart-value-label" text-anchor="middle" x="' + (x + barW / 2).toFixed(1) + '" y="' + Math.max(10, y - 6).toFixed(1) + '">' + fmt1(p.value) + '</text>' : '';
       return '<rect class="chart-bar-seg" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + Math.max(0, h).toFixed(1) + '" rx="3" fill="' + fill + '"/>' + label;
     }).join('');
-    var xLabels = points.map(function (p, i) {
-      var x = PL + slot * i + slot / 2;
-      return '<text class="chart-axis-label" text-anchor="middle" x="' + x.toFixed(1) + '" y="' + (CH - 4) + '">' + esc(p.label) + '</text>';
-    }).join('');
-
-    return '<svg class="chart-svg" viewBox="0 0 ' + CW + ' ' + CH + '" preserveAspectRatio="xMidYMid meet">' +
-      gridAndAxis(maxV) + bars + xLabels +
-    '</svg>';
+    return bars;
+    });
   }
 
   /* 積み上げ棒グラフ（buckets: [{label, segments:[{part,value,color}], total}]） */
@@ -234,10 +262,7 @@ var Charts = (function () {
       var totalLabel = b.total > 0 ? '<text class="chart-value-label" text-anchor="middle" x="' + (x + barW / 2).toFixed(1) + '" y="' + Math.max(10, yCursor - 6).toFixed(1) + '">' + fmt1(b.total) + '</text>' : '';
       return segHtml + totalLabel;
     }).join('');
-    var xLabels = buckets.map(function (b, i) {
-      var x = PL + slot * i + slot / 2;
-      return '<text class="chart-axis-label" text-anchor="middle" x="' + x.toFixed(1) + '" y="' + (CH - 4) + '">' + esc(b.label) + '</text>';
-    }).join('');
+    var xLabels = dateAxisLabels(buckets, function (i) { return PL + slot * i + slot / 2; });
 
     return '<svg class="chart-svg" viewBox="0 0 ' + CW + ' ' + CH + '" preserveAspectRatio="xMidYMid meet">' +
       gridAndAxis(maxV) + bars + xLabels +
@@ -307,6 +332,11 @@ var Charts = (function () {
       html += chartCard('推定1RM推移（kg）', lineChartSvg(recent.map(function (r) { return { label: labelOf(r), value: Math.round(r.rm * 10) / 10 }; })));
     }
     $('#chartExBody').innerHTML = html;
+    requestAnimationFrame(function () {
+      $$('.session-chart-scroll', $('#chartExBody')).forEach(function (el) {
+        el.scrollLeft = el.scrollWidth - el.clientWidth;
+      });
+    });
   }
 
   /* 部位別ボリューム1件分（週次 or 月次）のカードHTMLを組み立てる。データが無ければ空メッセージ */

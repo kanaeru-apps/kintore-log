@@ -1,5 +1,5 @@
 /* 筋トレLog Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v88-text-input-visibility';
+const CACHE = 'kintore-v89-chart-scroll';
 const ASSETS = [
   './',
   './index.html',

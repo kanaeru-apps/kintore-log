@@ -1061,6 +1061,14 @@ button { cursor: pointer; }
 .chart-axis-line { stroke: var(--line); stroke-width: 1; }
 .chart-gridline { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 4; }
 .chart-axis-label { fill: var(--dim); font-size: 10px; font-family: var(--font-body); }
+.chart-date-label { font-size: 9px; }
+.session-chart { display: flex; width: 100%; aspect-ratio: 320 / 150; }
+.session-chart-axis { display: block; flex: 0 0 13.75%; width: 13.75%; height: 100%; }
+.session-chart-axis .chart-axis-label { font-size: 9px; }
+.session-chart-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.session-chart-scroll::-webkit-scrollbar { display: none; }
+.session-chart-scroll .chart-svg { height: 100%; max-width: none; overflow: hidden; }
+.chart-scroll-hint { margin-top: 6px; color: var(--dim); font-size: 11px; text-align: right; }
 .chart-line-path { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .chart-line-dot { fill: var(--accent); }
 .chart-value-label { fill: var(--text); font-size: 10px; font-family: var(--font-num); }
