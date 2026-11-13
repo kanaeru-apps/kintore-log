@@ -1068,7 +1068,7 @@ button { cursor: pointer; }
 .session-chart-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .session-chart-scroll::-webkit-scrollbar { display: none; }
 .session-chart-scroll .chart-svg { height: 100%; max-width: none; overflow: hidden; }
-.chart-scroll-hint { margin-top: 6px; color: var(--dim); font-size: 11px; text-align: right; }
+.chart-scroll-hint { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 8px; color: var(--dim); font-size: 10px; line-height: 1; opacity: 0.7; user-select: none; }
 .chart-line-path { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .chart-line-dot { fill: var(--accent); }
 .chart-value-label { fill: var(--text); font-size: 10px; font-family: var(--font-num); }

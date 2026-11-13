@@ -1,5 +1,5 @@
 /* 筋トレLog Service Worker — ネットワーク優先＋オフラインフォールバック */
-const CACHE = 'kintore-v89-chart-scroll';
+const CACHE = 'kintore-v90-chart-scroll-arrows';
 const ASSETS = [
   './',
   './index.html',

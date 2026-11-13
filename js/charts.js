@@ -200,7 +200,7 @@ var Charts = (function () {
       '<div class="session-chart-scroll" tabindex="0" role="region" aria-label="記録のグラフ。横スクロールで過去の記録を表示">' +
       '<svg class="chart-svg" style="width:' + (Math.max(1, points.length) / visible * 100) + '%" viewBox="0 0 ' + width + ' ' + CH + '">' +
       grid + draw(xAt, slot) + dates + '</svg></div></div>' +
-      (points.length > 6 ? '<div class="chart-scroll-hint">横スクロールで過去の記録を表示</div>' : '');
+      (points.length > 6 ? '<div class="chart-scroll-hint" aria-hidden="true"><span>◀︎</span><span>▶︎</span></div>' : '');
   }
 
   /* 折れ線グラフ（points: [{label, value}]） */
